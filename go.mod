@@ -1,4 +1,4 @@
-module github.com/bfSan/cpa-plugin-policy-scheduler
+module github.com/bfSan/cpa-plugin-staged-scheduler
 
 go 1.26.4
 

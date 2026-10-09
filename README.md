@@ -1,10 +1,13 @@
-# CLIProxyAPI Model Policy Scheduler
+# CLIProxyAPI Staged Account Scheduler
 
 Model-aware scheduler plugin for CLIProxyAPI. It keeps the host scheduler as the default and overrides only exact model IDs declared in plugin configuration.
 
 > Fork of [abdwhb-png/cliproxy-model-policy-scheduler](https://github.com/abdwhb-png/cliproxy-model-policy-scheduler), maintained at
-> [bfSan/cpa-plugin-policy-scheduler](https://github.com/bfSan/cpa-plugin-policy-scheduler). The original repository is wired as the
+> [bfSan/cpa-plugin-staged-scheduler](https://github.com/bfSan/cpa-plugin-staged-scheduler). The original repository is wired as the
 > `upstream` remote; upstream keeps the original design, this fork is where our changes land.
+>
+> Work in this fork: model-scoped staged account scheduling — exhaust account A, then B, then fall through to a
+> weighted pool (C/D/E) — while keeping the existing strategies below.
 
 ## Why
 

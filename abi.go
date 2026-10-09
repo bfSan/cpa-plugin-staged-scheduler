@@ -63,10 +63,10 @@ func pluginRegistration() registration {
 	return registration{
 		SchemaVersion: pluginabi.SchemaVersion,
 		Metadata: pluginapi.Metadata{
-			Name:             "Model Policy Scheduler",
+			Name:             "Staged Account Scheduler",
 			Version:          "0.1.0",
 			Author:           "bfSan",
-			GitHubRepository: "https://github.com/bfSan/cpa-plugin-policy-scheduler",
+			GitHubRepository: "https://github.com/bfSan/cpa-plugin-staged-scheduler",
 			ConfigFields: []pluginapi.ConfigField{{
 				Name:        "rules",
 				Type:        pluginapi.ConfigFieldTypeObject,

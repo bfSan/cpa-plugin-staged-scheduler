@@ -1,4 +1,4 @@
-PLUGIN_ID := cliproxy-model-policy-scheduler
+PLUGIN_ID := staged-scheduler
 OUTPUT := dist/$(PLUGIN_ID).so
 
 .PHONY: fmt test race vet verify build
