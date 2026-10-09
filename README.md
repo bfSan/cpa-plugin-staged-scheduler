@@ -64,6 +64,28 @@ make build
 
 `make build` produces `dist/staged-scheduler.so` for Linux AMD64.
 
+## Panel
+
+The plugin ships a browser panel at `/v0/resource/plugins/staged-scheduler/panel`, listed in the
+management UI as **Staged Scheduler**. It shows the credential pool CPA currently knows about, edits
+the `rules` configuration, and replays a rule offline to show which account each pick would take.
+
+Nothing in the panel is privileged: the page asks for the management key and then calls CPA's own
+endpoints from the browser, so the plugin holds no key of its own. Rules are written through
+`PATCH /v0/management/plugins/staged-scheduler/config`, which is CPA's plugin-config endpoint.
+
+The replay runs on a throwaway plugin instance, so probing never advances the cursors live traffic
+depends on, and it sends no upstream request.
+
+## Management routes
+
+Both routes are authenticated by CPA itself:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/v0/management/plugins/staged-scheduler/status` | Configured rules plus the strategies this build implements. |
+| `POST` | `/v0/management/plugins/staged-scheduler/preview` | Replay one rule against a candidate set. Body: `{model, strategy?, iterations?, candidates[]}`. An unknown `strategy` is rejected rather than replayed. |
+
 ## Local CLIProxyAPI integration
 
 Mount the built library at `/CLIProxyAPI/plugins/staged-scheduler.so`, enable plugins globally, and configure `plugins.configs.staged-scheduler`.

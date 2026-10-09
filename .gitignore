@@ -1,3 +1,7 @@
 dist/
 *.h
 *.so
+
+# `go build ./...` in a main package writes an executable named after the
+# module. It is not a plugin artifact and must never reach the repository.
+/cpa-plugin-staged-scheduler
