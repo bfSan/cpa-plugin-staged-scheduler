@@ -581,7 +581,7 @@ function previewPool(){
   return accounts.filter(a => picked.has(a.name) && supportsModel(a, editing || $("pvModel").value));
 }
 
-/* ---- 别名与模型下拉 ---- */
+/* ---- 下游模型列表 ---- */
 // 下游最终可见的模型列表 = 用配置里的每个下游 key 请求 /v1/models，取并集。
 //
 // 为什么不推算：别名表(oauth-model-alias)里的条目**不一定**出现在下游列表里
@@ -708,7 +708,17 @@ function modelChip(m){
 function toggleModel(id){
   if (rules[id]) { editing = id; renderRuleList(); renderEditor(); return; }
   const i = selectedModels.indexOf(id);
-  if (i >= 0) selectedModels.splice(i, 1); else selectedModels.push(id);
+  if (i >= 0) { selectedModels.splice(i, 1); renderModelPicker(); return; }
+  // 多选是为了建一条“共用阶梯”的规则，所以新选的模型必须和已选的共享账号，
+  // 否则规则对其中一个不生效。这里直接拦下并说明原因，比事后警告清楚。
+  if (selectedModels.length && canShareWith(id, selectedModels) === false) {
+    const first = selectedModels[0];
+    toast("err", "「" + id + "」和「" + first + "」没有共同账号，不能共用一套阶梯。" +
+      "共用阶梯要求每个模型都能被阶梯里的账号服务，否则对该模型的请求会被跳过。" +
+      "请分别为它们建规则。");
+    return;
+  }
+  selectedModels.push(id);
   renderModelPicker();
 }
 
@@ -717,7 +727,7 @@ function renderModelSummary(){
   const bar = $("modelSummary");
   if (!selectedModels.length) { bar.style.display = "none"; bar.innerHTML = ""; return; }
   bar.style.display = "";
-  bar.innerHTML = `<span class="ver">已选 ${selectedModels.length} 个，第一个将是规则名：</span>` +
+  bar.innerHTML = `<span class="ver">已选 ${selectedModels.length} 个，第一个作为规则名，其余共用同一套阶梯 ${esc(selectedModels.length === 1 ? "（单个模型，可单独配一套账号顺序）" : (commonAccounts(selectedModels) ? "共同可用账号 " + commonAccounts(selectedModels).size + " 个" : "正在判断共同账号…"))}：</span>` +
     selectedModels.map(m => `<span class="schip">${esc(m)}<button data-unpick="${esc(m)}" title="移除">×</button></span>`).join("");
   bar.querySelectorAll("button[data-unpick]").forEach(b => {
     b.addEventListener("click", () => {
@@ -733,7 +743,7 @@ function normalizeRules(list){
   const out = {};
   (list || []).forEach(r => {
     if (!r || !r.model) return;
-    // 插件只会列出操作者真正写下的规则；别名通过 shared_with 挂在它下面。
+    // 插件只会列出操作者真正写下的规则；共用模型通过 shared_with 挂在它下面。
     out[r.model] = {
       strategy: r.strategy || "",
       provider_group_by: r.provider_group_by || "",
@@ -790,9 +800,9 @@ function renderRuleList(){
     const detail = rule.strategy === "staged"
       ? `${(rule.stages || []).length} 阶段: ${(rule.stages || []).map(s => s.mode === "first" ? "first" : "WRR").join(" → ")}`
       : (STRATEGY_LABEL[rule.strategy] || rule.strategy || "未设策略");
-    // 与它共用同一套阶梯的别名：点开详情才能看到，但列表里得先让人知道存在。
+    // 与它共用同一套阶梯的模型：列表里先给个数量提示，细节在规则详情里看。
     const shared = (rule.sharedWith && rule.sharedWith.length)
-      ? `<span class="chip">+${rule.sharedWith.length} 别名</span>` : "";
+      ? `<span class="chip">+${rule.sharedWith.length} 个模型共用</span>` : "";
     return `<li data-model="${esc(model)}" class="${model === editing ? "on" : ""}">
       <span class="m">${esc(model)} ${shared}<br><span class="ver">${esc(detail)}</span></span>
       <button class="mini" data-del="${esc(model)}">删除</button>
@@ -832,12 +842,18 @@ function renderEditor(){
   $("editHint").textContent = model;
   if ($("editStrategy").value !== rule.strategy) $("editStrategy").value = rule.strategy;
   const avail = availableFor(model);
-  $("editAvail").textContent = modelCatalog ? (avail.length + " 个账号支持该模型") : "模型目录未加载";
+  // 这条规则覆盖的模型（规则名 + 共用项）。阶梯里的账号必须对所有模型都成立，
+  // 所以真正有意义的数字是“共同可用账号”，而不是规则名自己的可用账号。
+  const covered = [model].concat(rule.sharedWith || []);
+  const common = commonAccounts(covered);
+  $("editAvail").textContent = !modelCatalog ? "模型目录未加载"
+    : covered.length === 1 ? (avail.length + " 个账号可服务该模型")
+    : (common ? (covered.length + " 个模型共同可用账号 " + common.size + " 个") : (covered.length + " 个模型 (无法判断共同账号)"));
   $("unlistedBar").style.display = rule.strategy === "staged" ? "" : "none";
   $("editUnlisted").checked = rule.unlisted === "include";
 
-  // 别名条：这条规则还覆盖哪些模型 ID。别名共用同一套阶梯，所以这里只改
-  // 名单，不复制阶梯内容。
+  // 共用条：这条规则还覆盖哪些模型。它们共用同一套阶梯，所以这里只改名单，
+  // 不复制阶梯内容。
   card.innerHTML = aliasBarHtml(rule);
   bindAliasBar(rule);
 
@@ -851,7 +867,7 @@ function renderEditor(){
   }
 
   if (!rule.stages || !rule.stages.length) {
-    // 追加而不是覆盖：别名条已经渲染在 card 里了。
+    // 追加而不是覆盖：共用条已经渲染在 card 里了。
     card.insertAdjacentHTML("beforeend", '<div class="empty">这条 staged 规则还没有阶段。点上方「自动编排」按可用账号生成一条阶梯。</div>');
     $("editorNote").textContent = "";
     return;
@@ -860,49 +876,70 @@ function renderEditor(){
   card.insertAdjacentHTML("beforeend", rule.stages.map((stage, i) => stageCard(stage, i, rule.stages.length)).join(""));
   bindStageEvents(rule);
   $("editorNote").innerHTML = avail.length
-    ? `可用账号 ${avail.length} 个：${esc(avail.map(a => shortName(a)).join("、"))}`
+    ? `可服务 <code>${esc(model)}</code> 的账号 ${avail.length} 个：${esc(avail.map(a => accLabel(a.name)).join("、"))}`
     : `没有账号的模型目录包含 <code>${esc(model)}</code>；请确认模型 ID 写对了。`;
 }
 
-// aliasBarHtml 渲染“这条规则还覆盖哪些模型 ID”。别名与规则名共用同一套
-// 阶梯，所以这里只维护名单；加进来之后调度器对那个 ID 的请求就会走这条阶梯。
+// aliasBarHtml 渲染“这条规则还覆盖哪些模型”。共用是有条件的：阶梯里写的账号
+// 必须真的能服务每一个模型，否则那些模型的请求进来时阶段池是空的、会被跳过，
+// 规则看着配了实际不生效。所以这里把每个模型的可用账号数摆出来，共同账号为 0
+// 时直接标红。
 function aliasBarHtml(rule){
-  const chips = (rule.sharedWith || []).map(m =>
-    `<span class="chip hit" style="margin-right:6px">${esc(m)}<button class="mini" data-alias-del="${esc(m)}" style="margin-left:6px;padding:0 5px">×</button></span>`
-  ).join("");
+  const covered = [editing].concat(rule.sharedWith || []);
+  const common = commonAccounts(covered);
+  const bad = common && common.size === 0;
+
+  const rows = covered.map(m => {
+    const isRule = m === editing;
+    const n = modelCatalog ? availableFor(m).length : null;
+    const sharesCommon = !common || isRule || commonAccounts([m, editing])?.size > 0;
+    return `<span class="chip ${bad && !isRule ? "err" : ""}" style="margin:0 6px 6px 0">
+      ${esc(m)}${isRule ? ' <span class="sub">规则名</span>' : ""}
+      <span class="sub">${n === null ? "?" : n} 个账号</span>
+      ${isRule ? "" : `<button class="mini" data-alias-del="${esc(m)}" style="margin-left:6px;padding:0 5px">×</button>`}
+    </span>`;
+  }).join("");
+
+  // 候选：下游真实可见、且与该规则名有共同账号的模型 —— 没有共同账号的选了也
+  // 不生效，所以干脆不列出来，避免再次踩坑。
+  const taken = new Set(covered);
+  const cand = downstream.map(m => m.id).filter(id => !taken.has(id) && !rules[id] && canShareWith(id, [editing]) !== false);
+
   return `<div class="stage" style="background:var(--card)">
     <div class="stage-head">
-      <b style="font-size:13px">共用这条规则的模型 ID</b>
-      <span class="ver">多选别名后，对它们的请求都会走下面这套阶梯</span>
+      <b style="font-size:13px">这条规则覆盖哪些模型</b>
+      <span class="ver">它们共用下面这一套账号阶梯</span>
     </div>
-    <div style="margin:6px 0">${chips || '<span class="ver">（暂无别名，只有规则名本身）</span>'}</div>
+    <div style="margin:6px 0">${rows}</div>
+    ${bad ? `<div class="stage-note" style="color:var(--err);border-color:var(--err)">
+      ⚠ 这些模型<strong>没有共同账号</strong>，阶梯对其中部分模型不会生效（请求会交回 CPA 内置调度）。
+      建议拆成多条规则：把“同一渠道、能共用账号”的模型放在一起。
+    </div>` : ""}
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <select id="aliasPick" style="flex:1 1 220px"></select>
-      <button class="mini" id="btnAliasAdd">添加别名</button>
+      <select id="aliasPick" style="flex:1 1 220px">
+        <option value="">（选择要一起共用的模型）</option>
+        ${cand.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("")}
+      </select>
+      <button class="mini" id="btnAliasAdd">加入共用</button>
     </div>
     <div class="stage-note">
-      别名与规则名不能重复：如果某个 ID 已经是一条独立规则，插件会拒绝整份配置。
-      别名各自维护自己的轮转位置，两条流量不会互相干扰。
+      只列出与 <code>${esc(editing)}</code> 有共同账号的模型。共用同一阶梯的模型
+      各自维护自己的轮转位置，两条流量不会互相干扰；某个 ID 若已是独立规则则不能共用。
     </div>
   </div>`;
 }
 
 function bindAliasBar(rule){
-  const sel = $("aliasPick");
-  if (sel) {
-    // 候选 = 下游真实可见的模型，减去规则名与已选共用项。列表来自 /v1/models，
-    // 所以选出来的名字一定是客户端请求得到的。
-    const taken = new Set([editing, ...(rule.sharedWith || [])]);
-    const options = downstream.map(m => m.id).filter(id => !taken.has(id));
-    sel.innerHTML = '<option value="">（选择要共用的模型）</option>' +
-      options.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
-  }
   const add = $("btnAliasAdd");
   if (add) {
     add.addEventListener("click", () => {
       const value = $("aliasPick").value;
       if (!value) { toast("err", "先在下拉里选一个模型"); return; }
       if (rules[value]) { toast("err", "该模型已有独立规则，不能作为共用项"); return; }
+      if (canShareWith(value, [editing].concat(rule.sharedWith || [])) === false) {
+        toast("err", "「" + value + "」与当前阶梯没有共同账号，加了也不会生效");
+        return;
+      }
       rule.sharedWith = rule.sharedWith || [];
       if (rule.sharedWith.indexOf(value) < 0) rule.sharedWith.push(value);
       markDirty(); renderEditor(); renderRuleList();
@@ -1040,6 +1077,41 @@ function availableFor(model){
   return accounts.filter(a => supportsModel(a, model));
 }
 
+// 一条 staged 规则是“这个模型的账号顺序”。两个模型能共用同一条阶梯的前提是：
+// 至少有一个账号同时服务它们 —— 否则某个阶段对其中一个模型永远是空池，会被
+// 跳过，规则看着配了、实际不生效。下面这几个函数就是把这个前提具象化。
+function servingSet(model){
+  if (!modelCatalog) return null;   // 目录还没读完，无法判断
+  return new Set(availableFor(model).map(a => a.name));
+}
+
+// 一组模型共同可用的账号。返回 null 表示“暂时判断不了”。
+function commonAccounts(models){
+  if (!modelCatalog || !models || !models.length) return null;
+  let acc = null;
+  for (const m of models) {
+    const s = servingSet(m);
+    if (!s) return null;
+    acc = acc === null ? s : new Set(Array.from(acc).filter(x => s.has(x)));
+  }
+  return acc || new Set();
+}
+
+// 把 model 加进 others 之后，共同账号是否还非空。null = 判断不了。
+function canShareWith(model, others){
+  if (!modelCatalog || !others || !others.length) return true;
+  const common = commonAccounts(others);
+  const s = servingSet(model);
+  if (!common || !s) return null;
+  for (const x of s) if (common.has(x)) return true;
+  return false;
+}
+
+// 短名：账号文件名的可读缩写，只用于界面显示。
+function accLabel(name){
+  return shortName(String(name));
+}
+
 function autoLadder(model){
   const avail = availableFor(model).filter(usable);
   const pool = avail.length ? avail : availableFor(model);
@@ -1056,7 +1128,7 @@ function autoLadder(model){
 /* ---- 保存 ---- */
 function rulePayload(rule){
   const entry = { strategy: rule.strategy };
-  // 多选的别名随规则一起提交：插件会把它们展开成共享同一套阶梯的条目。
+  // 多选的模型随规则一起提交：插件会把它们展开成共享同一套阶梯的条目。
   if (rule.sharedWith && rule.sharedWith.length) entry.models = rule.sharedWith.slice();
   if (rule.strategy === "staged") {
     entry.stages = (rule.stages || []).map(s => {
@@ -1274,21 +1346,31 @@ $("btnModelReload").addEventListener("click", () => busy($("btnModelReload"), as
 }));
 
 $("btnAddRule").addEventListener("click", () => {
-  // 多选：第一个选中项作为规则名（阶梯挂在它名下），其余作为别名共享同一套阶梯。
+  // 多选：第一个选中项作为规则名（阶梯挂在它名下），其余模型共用同一套阶梯。
   const chosen = selectedModels.slice();
   const model = chosen[0];
   if (!model) { toast("err", "先在上面的列表里点选至少一个模型"); return; }
   if (rules[model]) { toast("err", "该模型已有规则"); editing = model; renderRuleList(); renderEditor(); return; }
 
   const shared = chosen.slice(1).filter(a => a !== model);
-  // 别名不能是已有规则，否则会被插件判为歧义配置而整份拒绝。
+  // 共用项不能是已有规则，否则会被插件判为歧义配置而整份拒绝。
   const clash = shared.filter(a => rules[a]);
   if (clash.length) {
-    toast("err", "这些模型已有自己的规则，不能作为别名：" + clash.join("、"));
+    toast("err", "这些模型已有自己的规则，不能作为共用项：" + clash.join("、"));
+    return;
+  }
+  // 最后一道闸：共用阶梯必须对每个模型都成立（有共同账号），否则那部分模型
+  // 的规则形同虚设。选的时候已经拦过，这里再确认一次防止漏网。
+  if (shared.length && canShareWith(model, shared) === false) {
+    toast("err", "选中的模型之间没有共同账号，无法共用一套阶梯。请拆成多条规则。");
     return;
   }
 
   const ladder = autoLadder(model);
+  if (shared.length && !ladder) {
+    toast("err", "「" + model + "」没有可用账号，无法生成阶梯。");
+    return;
+  }
   rules[model] = ladder
     ? { strategy: "staged", stages: ladder, unlisted: "exclude", provider_group_by: "", provider_weights: {}, sharedWith: shared }
     : { strategy: strategies[0] || "fill-first", stages: [], unlisted: "exclude", provider_group_by: "", provider_weights: {}, sharedWith: shared };
@@ -1298,7 +1380,10 @@ $("btnAddRule").addEventListener("click", () => {
   editing = model;
   markDirty(); renderRuleList(); renderEditor(); renderAccounts(); renderModelPicker();
   $("pvModel").value = model;
-  if (shared.length) toast("ok", "这条规则同时覆盖 " + shared.length + " 个模型");
+  if (shared.length) {
+    const common = commonAccounts([model].concat(shared));
+    toast("ok", "这条规则覆盖 " + (shared.length + 1) + " 个模型，共同可用账号 " + (common ? common.size : "?") + " 个");
+  }
 });
 
 $("editStrategy").addEventListener("change", () => {
