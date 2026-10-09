@@ -259,3 +259,106 @@ func groupWeight(rule ruleConfig, group string) int64 {
 	}
 	return 1
 }
+
+// -----------------------------------------------------------------------------
+// Panel support: read-only snapshots and offline probing
+// -----------------------------------------------------------------------------
+
+// ruleSnapshot is the panel-facing view of one configured rule. It mirrors the
+// configuration rather than any live cursor, because the panel exists to answer
+// "what is configured" before it answers "what would happen".
+type ruleSnapshot struct {
+	Model           string           `json:"model"`
+	Strategy        string           `json:"strategy"`
+	ProviderGroupBy string           `json:"provider_group_by,omitempty"`
+	ProviderWeights map[string]int64 `json:"provider_weights,omitempty"`
+}
+
+// snapshots returns every configured rule, sorted by model ID so the panel has a
+// stable order to render.
+func (p *schedulerPlugin) snapshots() []ruleSnapshot {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]ruleSnapshot, 0, len(p.config.Rules))
+	for model, rule := range p.config.Rules {
+		out = append(out, ruleSnapshot{
+			Model:           model,
+			Strategy:        rule.Strategy,
+			ProviderGroupBy: rule.ProviderGroupBy,
+			ProviderWeights: cloneWeights(rule.ProviderWeights),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Model < out[j].Model })
+	return out
+}
+
+func cloneWeights(src map[string]int64) map[string]int64 {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]int64, len(src))
+	for key, value := range src {
+		out[key] = value
+	}
+	return out
+}
+
+// probeStep is one simulated pick. A step is either a concrete credential, a
+// delegation back to a built-in scheduler, or a refusal to handle the request.
+type probeStep struct {
+	Index           int    `json:"index"`
+	Handled         bool   `json:"handled"`
+	AuthID          string `json:"auth_id,omitempty"`
+	DelegateBuiltin string `json:"delegate_builtin,omitempty"`
+}
+
+// probe replays a rule against a candidate set on a throwaway instance, so the
+// panel can show what the scheduler would pick without advancing the cursors the
+// live traffic depends on. strategy optionally overrides the configured one for
+// the probed model, which is what makes "try another strategy" possible before
+// anything is saved.
+func (p *schedulerPlugin) probe(
+	model string,
+	strategy string,
+	candidates []pluginapi.SchedulerAuthCandidate,
+	iterations int,
+) []probeStep {
+	probeCfg := p.configSnapshot()
+	trimmedModel := strings.TrimSpace(model)
+	if override := strings.ToLower(strings.TrimSpace(strategy)); override != "" {
+		rule := probeCfg.Rules[trimmedModel]
+		rule.Strategy = override
+		probeCfg.Rules[trimmedModel] = rule
+	}
+
+	run := newSchedulerPlugin()
+	run.config = probeCfg
+
+	steps := make([]probeStep, 0, iterations)
+	for index := 0; index < iterations; index++ {
+		response := run.Pick(pluginapi.SchedulerPickRequest{
+			Model:      trimmedModel,
+			Candidates: candidates,
+		})
+		steps = append(steps, probeStep{
+			Index:           index,
+			Handled:         response.Handled,
+			AuthID:          response.AuthID,
+			DelegateBuiltin: response.DelegateBuiltin,
+		})
+	}
+	return steps
+}
+
+// configSnapshot copies the current rules so a probe never shares map storage
+// with the live configuration.
+func (p *schedulerPlugin) configSnapshot() pluginConfig {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := pluginConfig{Rules: make(map[string]ruleConfig, len(p.config.Rules))}
+	for model, rule := range p.config.Rules {
+		rule.ProviderWeights = cloneWeights(rule.ProviderWeights)
+		out.Rules[model] = rule
+	}
+	return out
+}

@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+<title>分阶段账号调度</title>
+<style>
+/* Theme tokens shared with the CPA management panel and the sibling plugin
+   panels (model-registry / workbuddy / qoder / cline). The theme is chosen by a
+   data-theme attribute on <html> so an embedded iframe can follow the CPA
+   parent, which a bare prefers-color-scheme query cannot do. */
+:root{
+  --bg:#faf9f5;--card:#ffffff;--border:#e3e1db;--fg:#2d2a26;--mut:#6d6760;
+  --acc:#4c8dff;--on-acc:#ffffff;--ok:#10b981;--warn:#e0aa14;--err:#c65746;
+  --surface:#f0eee8;--surface-muted:#e9e6df;--btn-sec:#eef1f6;--btn-sec-hover:#e4e8ef;
+  --input-bg:#ffffff;--code-bg:#f3f4f6;--code-fg:#374151;--placeholder:rgba(109,103,96,.55);
+  --ok-soft:rgba(16,185,129,.10);--ok-border:rgba(16,185,129,.30);
+  --warn-soft:rgba(224,170,20,.12);--warn-border:rgba(224,170,20,.32);
+  --err-soft:rgba(198,87,70,.10);--err-border:rgba(198,87,70,.30);
+  --mut-soft:rgba(109,103,96,.12);--mut-border:rgba(109,103,96,.28);
+  --toast-shadow:0 10px 28px rgba(0,0,0,.12),0 0 0 1px rgba(0,0,0,.04);
+  --acc-ring:rgba(76,141,255,.18);--radius-md:12px;--radius-lg:16px;
+  color-scheme:light
+}
+:root[data-theme="white"]{
+  --bg:#f5f5f5;--card:#ffffff;--border:#e6e6e6;--fg:#1f1f1f;--mut:#707070;
+  --surface:#fafafa;--surface-muted:#efefef;--btn-sec:#f0f0f0;--btn-sec-hover:#e8e8e8;
+  --input-bg:#ffffff;--code-bg:#f3f4f6;--code-fg:#374151;--placeholder:rgba(112,112,112,.55);
+  color-scheme:light
+}
+:root[data-theme="dark"]{
+  --bg:#1e1d1b;--card:#26241f;--border:#3a3833;--fg:#ede9e3;--mut:#9a948c;
+  --acc:#4c8dff;--on-acc:#ffffff;--ok:#34d399;--warn:#f0c050;--err:#e07a6a;
+  --surface:#2f2d28;--surface-muted:#35332e;--btn-sec:#35332e;--btn-sec-hover:#3f3c36;
+  --input-bg:#1e1d1b;--code-bg:#35332e;--code-fg:#d6d1c9;--placeholder:rgba(154,148,140,.55);
+  --ok-soft:rgba(52,211,153,.12);--ok-border:rgba(52,211,153,.38);
+  --warn-soft:rgba(240,192,80,.14);--warn-border:rgba(240,192,80,.38);
+  --err-soft:rgba(224,122,106,.12);--err-border:rgba(224,122,106,.38);
+  --mut-soft:rgba(154,148,140,.16);--mut-border:rgba(154,148,140,.32);
+  color-scheme:dark
+}
+*{box-sizing:border-box}
+html,body{max-width:100%;overflow-x:hidden}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.5 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+code,.name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+header{background:var(--card);border-bottom:1px solid var(--border);
+  padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+header h1{font-size:16px;margin:0;font-weight:600}
+.ver{color:var(--mut);font-size:12px}
+.spacer{flex:1 1 auto}
+main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;padding:16px;max-width:1560px;margin:0 auto}
+@media (max-width:1040px){main{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-md);
+  overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.card>h2{margin:0;padding:12px 14px;font-size:14px;font-weight:600;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.card>h2 .hint{font-weight:400;color:var(--mut);font-size:12px}
+.bar{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.body{padding:10px 14px;overflow:auto;max-height:58vh}
+.note{color:var(--mut);font-size:12px;padding:8px 14px;border-top:1px solid var(--border);background:var(--surface)}
+button{font:inherit;font-size:13px;background:var(--btn-sec);color:var(--fg);border:1px solid var(--border);
+  border-radius:8px;padding:7px 12px;cursor:pointer;white-space:nowrap}
+button:hover{background:var(--btn-sec-hover)}
+button.primary{background:var(--acc);border-color:var(--acc);color:var(--on-acc)}
+button.primary:hover{filter:brightness(1.05)}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.mini{padding:3px 8px;font-size:12px;line-height:1.4}
+input[type=text],input[type=search],input[type=password],input[type=number],select{font:inherit;font-size:13px;
+  background:var(--input-bg);color:var(--fg);border:1px solid var(--border);border-radius:8px;
+  padding:7px 10px;min-width:0;max-width:100%}
+input::placeholder{color:var(--placeholder)}
+input.grow{flex:1 1 160px}
+label.chk{display:flex;align-items:center;gap:6px;color:var(--mut);user-select:none;font-size:13px}
+.chip{display:inline-block;background:var(--mut-soft);border:1px solid var(--mut-border);border-radius:99px;
+  padding:2px 9px;font-size:11px;font-weight:600;color:var(--mut);white-space:nowrap}
+.chip.hit{color:var(--ok);background:var(--ok-soft);border-color:var(--ok-border)}
+.chip.none{color:var(--warn);background:var(--warn-soft);border-color:var(--warn-border)}
+.chip.err{color:var(--err);background:var(--err-soft);border-color:var(--err-border)}
+table.grid{width:100%;border-collapse:collapse;font-size:12px}
+table.grid th{text-align:left;font-weight:600;color:var(--mut);font-size:11px;padding:4px 8px;
+  border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--card);z-index:1}
+table.grid td{padding:5px 8px;border-bottom:1px dashed var(--border);vertical-align:middle;overflow-wrap:anywhere}
+table.grid tr:last-child td{border-bottom:0}
+table.grid td.pick{width:30px}
+table.grid td.act{width:1%;white-space:nowrap;text-align:right}
+table.grid tr.off{color:var(--mut)}
+table.grid tr.off .name{text-decoration:line-through}
+table.grid tr.sel{background:var(--acc-ring)}
+.stage-step{display:inline-flex;align-items:center;gap:6px;margin:0 6px 6px 0;padding:4px 8px;
+  border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:12px}
+.stage-step b{color:var(--acc);font-weight:600}
+.stage-step.miss{color:var(--mut);border-style:dashed}
+.empty{color:var(--mut);padding:16px 2px;font-size:13px;text-align:center}
+#auth{padding:10px 16px;background:var(--warn-soft);border-bottom:1px solid var(--warn-border);
+  color:var(--warn);display:none;gap:8px;align-items:center;flex-wrap:wrap}
+#toasts{position:fixed;top:16px;right:16px;display:flex;flex-direction:column;gap:10px;z-index:9999;max-width:360px}
+.toast{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--acc);
+  border-radius:var(--radius-md);padding:12px 16px;font-size:13px;box-shadow:var(--toast-shadow);
+  transform:translateX(120%);opacity:0;transition:transform .3s cubic-bezier(.2,.9,.3,1.1),opacity .25s;
+  cursor:pointer;word-break:break-all}
+.toast.show{transform:translateX(0);opacity:1}
+.toast.ok{border-left-color:var(--ok);background:var(--ok-soft)}
+.toast.err{border-left-color:var(--err);background:var(--err-soft)}
+@media (max-width:640px){header{padding:10px 12px}main{padding:12px;gap:12px}}
+</style>
+<script>
+/* Early theme sync: follow the CPA parent theme when embedded, else the OS
+   preference. Same semantics as the sibling plugin panels. */
+(function(){
+  var ATTR="data-theme";
+  function embedded(){try{return window.self!==window.top}catch(e){return false}}
+  function apply(t){var el=document.documentElement;if(t==="white"||t==="dark")el.setAttribute(ATTR,t);else el.removeAttribute(ATTR)}
+  function parentTheme(){
+    if(!embedded())return null;
+    try{var raw=window.parent.document.documentElement.getAttribute(ATTR);if(raw==="white"||raw==="dark")return raw;return "light"}catch(e){return null}
+  }
+  function systemTheme(){try{return window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}catch(e){return "light"}}
+  function sync(){apply(parentTheme()||systemTheme())}
+  sync();
+  window.__ssThemeSync=function(){
+    sync();
+    if(!embedded()){
+      try{var mq=window.matchMedia("(prefers-color-scheme: dark)");var on=function(){sync()};if(mq.addEventListener)mq.addEventListener("change",on);else if(mq.addListener)mq.addListener(on)}catch(e){}
+      return;
+    }
+    try{
+      var parentEl=window.parent.document.documentElement;
+      new MutationObserver(sync).observe(parentEl,{attributes:true,attributeFilter:[ATTR]});
+      window.addEventListener("storage",function(e){if(e.key==="cli-proxy-theme")sync()});
+    }catch(e){}
+  };
+})();
+</script>
+</head>
+<body>
+<header>
+  <h1>分阶段账号调度</h1><span class="ver" id="ver"></span>
+  <span class="chip" id="src">未配置规则</span>
+  <span class="spacer"></span>
+  <span class="hint ver" id="stratHint"></span>
+</header>
+
+<div id="auth">
+  <span>需要 CPA 管理密钥</span>
+  <input type="password" class="grow" id="keyInput" placeholder="管理密钥" autocomplete="off">
+  <button onclick="saveKey()">确定</button>
+  <button class="mini" onclick="suppressKey()">本次不用</button>
+</div>
+
+<main>
+  <!-- 账号池 -->
+  <section class="card">
+    <h2>账号池 <span class="hint">规则里写的就是这里的 name</span>
+      <span class="spacer"></span><span class="chip" id="accCnt"></span></h2>
+    <div class="bar">
+      <input type="search" class="grow" id="accFilter" placeholder="筛选账号 / 邮箱">
+      <select id="accProvider"><option value="">全部 provider</option></select>
+      <label class="chk"><input type="checkbox" id="accOnlyUsable">只看可用</label>
+      <button class="mini" id="btnAccReload">重新读取</button>
+    </div>
+    <div class="body"><table class="grid" id="accTable">
+      <thead><tr>
+        <th class="pick"><input type="checkbox" id="accAll"></th>
+        <th>name</th><th>provider</th><th>状态</th><th>优先级</th>
+      </tr></thead>
+      <tbody id="accRows"></tbody>
+    </table></div>
+    <div class="note">
+      数据来自 CPA 的 <code>/v0/management/auth-files</code>,这里只读。勾选账号用于右侧试算,
+      不会修改任何凭据。Cooldown / disabled 的账号在实际请求里已经被 CPA 从候选里剔除,
+      所以「烧干一个号再换下一个」不需要插件自己判额度。
+    </div>
+  </section>
+
+  <!-- 规则 -->
+  <section class="card">
+    <h2>调度规则 <span class="hint">按模型 ID 精确匹配</span>
+      <span class="spacer"></span><span class="chip" id="ruleCnt"></span></h2>
+    <div class="bar">
+      <input type="text" class="grow" id="newModel" placeholder="模型 ID,如 gpt-6.1-sol">
+      <button id="btnAddRule">添加规则</button>
+      <span class="spacer"></span>
+      <button class="primary" id="btnSaveRules" disabled>保存到 CPA</button>
+      <button id="btnRevertRules" disabled>放弃改动</button>
+    </div>
+    <div class="body"><table class="grid" id="ruleTable">
+      <thead><tr><th>模型</th><th>策略</th><th class="act"></th></tr></thead>
+      <tbody id="ruleRows"></tbody>
+    </table></div>
+    <div class="note">
+      保存走 CPA 的 <code>/v0/management/plugins/staged-scheduler/config</code>,用的是你填的管理密钥;
+      插件自己既不持有密钥也不落盘别名之外的任何东西。没有规则的模型一律交回 CPA 内置调度,
+      不会被这个插件改写。
+    </div>
+  </section>
+
+  <!-- 试算 -->
+  <section class="card" style="grid-column:1/-1">
+    <h2>试算 <span class="hint">用插件同一套选择代码离线重放,不推进线上游标</span>
+      <span class="spacer"></span><span class="chip" id="pvCand"></span></h2>
+    <div class="bar">
+      <select id="pvModel"></select>
+      <select id="pvStrategy"></select>
+      <label class="chk">次数 <input type="number" id="pvIter" value="8" min="1" max="200" style="width:72px"></label>
+      <button class="primary" id="btnPreview">开始试算</button>
+      <span class="spacer"></span>
+      <button class="mini" id="btnUseConfig" title="把规则与账号池重新代入试算">重新读取配置与账号</button>
+    </div>
+    <div class="body">
+      <div id="pvSteps" class="empty">选好模型与账号后点「开始试算」。</div>
+      <div id="pvSummary" style="margin-top:10px"></div>
+    </div>
+    <div class="note" id="pvNote">
+      试算在插件的独立副本上跑,不会动线上轮转位置,也不发任何上游请求。
+    </div>
+  </section>
+</main>
+
+<div id="toasts"></div>
+
+<footer class="note" style="border-top:0;background:transparent;text-align:center;padding:4px 16px 20px">
+  管理接口：<code id="apiPath"></code>
+</footer>
+
+<script>
+// The host injects a quoted JS literal here, so the placeholder must not sit
+// inside its own quotes.
+const MANAGEMENT_BASE_PATH = __SS_MANAGEMENT_BASE_PATH_JSON__;
+const PLUGIN_ID = "staged-scheduler";
+const PLUGIN_API = MANAGEMENT_BASE_PATH + "/plugins/" + PLUGIN_ID;
+const PLUGIN_CONFIG_PATH = PLUGIN_API + "/config";
+
+/* ---- 管理密钥: URL ?key= > sessionStorage > CPA 主面板 localStorage ---- */
+const ENC_PREFIX = "enc::v1::";
+const SECRET_SALT = "cli-proxy-api-webui::secure-storage";
+const PANEL_STORE = "cli-proxy-auth";
+const SS_KEY = "staged-scheduler-mgmt-key";
+let keySuppressed = false;
+
+const readSessionKey = () => keySuppressed ? null : (() => { try { return sessionStorage.getItem(SS_KEY); } catch (_) { return null; } })();
+const storeSessionKey = k => { try { sessionStorage.setItem(SS_KEY, k); keySuppressed = false; return true; } catch (_) { return false; } };
+function deobfuscate(p){
+  if(!p || !p.startsWith(ENC_PREFIX)) return p;
+  try{
+    const bytes = new TextEncoder().encode(SECRET_SALT + "|" + location.host + "|" + navigator.userAgent);
+    const bin = atob(p.slice(ENC_PREFIX.length));
+    const out = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i) ^ bytes[i % bytes.length];
+    return new TextDecoder().decode(out);
+  }catch(_){ return p; }
+}
+function readPanelKey(){
+  try { if (window.self === window.top) return null; } catch (_) { return null; }
+  let raw; try { raw = localStorage.getItem(PANEL_STORE); } catch (_) { return null; }
+  if (!raw) return null;
+  try{
+    const parsed = JSON.parse(deobfuscate(raw));
+    const st = (parsed && parsed.state) || parsed || {};
+    return typeof st.managementKey === "string" && st.managementKey ? st.managementKey : null;
+  }catch(_){ return null; }
+}
+(function captureUrlKey(){
+  const url = new URL(location.href);
+  const k = url.searchParams.get("key");
+  if (!k) return;
+  storeSessionKey(k);
+  url.searchParams.delete("key");
+  history.replaceState(null, "", url.pathname + url.search + url.hash);
+})();
+const getKey = () => readSessionKey() || readPanelKey();
+function saveKey(){
+  const v = document.getElementById("keyInput").value.trim();
+  if (!v) return;
+  if (!storeSessionKey(v)) { showAuth(); return; }
+  document.getElementById("auth").style.display = "none";
+  boot();
+}
+function suppressKey(){ keySuppressed = true; try { sessionStorage.removeItem(SS_KEY); } catch (_) {} document.getElementById("auth").style.display = "none"; }
+function showAuth(){ document.getElementById("auth").style.display = "flex"; const i = document.getElementById("keyInput"); if (i) i.focus(); }
+const authHeaders = k => k ? { "Authorization": "Bearer " + k, "X-Management-Key": k } : {};
+
+async function call(path, opts = {}){
+  const k = getKey();
+  if (!k) { showAuth(); throw new Error("需要管理密钥"); }
+  const r = await fetch(path, { ...opts, credentials: "omit", headers: { ...(opts.headers || {}), ...authHeaders(k) } });
+  if (r.status === 401 || r.status === 403) { showAuth(); throw new Error("管理密钥无效"); }
+  const text = await r.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (_) { throw new Error("响应不是 JSON: " + text.slice(0, 120)); }
+  if (!r.ok) throw new Error((data && (data.message || data.error)) || ("HTTP " + r.status));
+  return data;
+}
+
+function toast(kind, msg){
+  const box = document.getElementById("toasts");
+  const el = document.createElement("div");
+  el.className = "toast" + (kind === "err" ? " err" : kind === "ok" ? " ok" : "");
+  el.textContent = msg;
+  box.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("show"));
+  const life = setTimeout(dismiss, kind === "err" ? 6000 : 3200);
+  function dismiss(){ clearTimeout(life); el.remove(); }
+  el.addEventListener("click", dismiss);
+}
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* ---- 状态 ---- */
+let accounts = [];          // 来自 CPA 的凭据列表
+let selected = new Set();   // 勾选的 name（= candidate ID）
+let rules = {};             // model -> rule（本地编辑态）
+let savedRules = {};        // 上次保存成功的快照，用于 dirty 判定
+let strategies = [];        // 插件支持的策略
+let dirty = false;
+
+const STRATEGY_LABEL = {
+  "fill-first": "fill-first（委托 CPA 内置）",
+  "round-robin": "round-robin（委托 CPA 内置）",
+  "provider-weighted-round-robin": "provider-weighted-round-robin（按 provider/base-url 分组加权轮转）",
+  "staged": "staged（按账号分阶段:先烧 A 再 B 再进池）"
+};
+
+function markDirty(){
+  dirty = true;
+  $("src").textContent = "有未保存的修改";
+  $("src").className = "chip none";
+  $("btnSaveRules").disabled = false;
+  $("btnRevertRules").disabled = false;
+}
+function markClean(configured){
+  dirty = false;
+  $("src").textContent = configured ? "规则来自配置" : "未配置规则";
+  $("src").className = "chip" + (configured ? " hit" : " none");
+  $("btnSaveRules").disabled = true;
+  $("btnRevertRules").disabled = true;
+}
+
+/* ---- 读取账号池 ---- */
+async function loadAccounts(){
+  const data = await call(MANAGEMENT_BASE_PATH + "/auth-files");
+  const files = (data && data.files) || [];
+  accounts = files.map(f => ({
+    name: f.name || f.id || "",
+    provider: (f.provider || f.type || "").toLowerCase(),
+    label: f.label || "",
+    email: f.email || "",
+    status: f.status || "",
+    priority: (typeof f.priority === "number") ? f.priority : 0,
+    disabled: !!f.disabled,
+    unavailable: !!f.unavailable,
+    source: f.source || ""
+  })).filter(a => a.name);
+  accounts.sort((a, b) => (a.provider + a.name).localeCompare(b.provider + b.name));
+
+  fillProviders();
+  // 首次进入默认勾选 codex 里当前可用的账号 —— 这是最常见的工作集,
+  // 但仍然只是勾选,不改任何东西。
+  if (selected.size === 0) {
+    const codex = accounts.filter(a => a.provider === "codex" && usable(a));
+    (codex.length ? codex : accounts.filter(usable)).forEach(a => selected.add(a.name));
+  }
+  renderAccounts();
+}
+
+const usable = a => !a.disabled && !a.unavailable && a.status !== "error" && a.status !== "disabled";
+
+function fillProviders(){
+  const set = new Set(accounts.map(a => a.provider).filter(Boolean));
+  const sel = $("accProvider");
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">全部 provider</option>' +
+    Array.from(set).sort().map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+  sel.value = keep;
+}
+
+function visibleAccounts(){
+  const q = $("accFilter").value.trim().toLowerCase();
+  const prov = $("accProvider").value;
+  const only = $("accOnlyUsable").checked;
+  return accounts.filter(a => {
+    if (prov && a.provider !== prov) return false;
+    if (only && !usable(a)) return false;
+    if (!q) return true;
+    return (a.name + " " + a.label + " " + a.email).toLowerCase().includes(q);
+  });
+}
+
+function renderAccounts(){
+  const rows = visibleAccounts();
+  $("accCnt").textContent = rows.length + " / " + accounts.length;
+  const tbody = $("accRows");
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty">没有匹配的账号</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(a => {
+    const cls = [selected.has(a.name) ? "sel" : "", usable(a) ? "" : "off"].filter(Boolean).join(" ");
+    const statusChip = a.disabled ? '<span class="chip">disabled</span>'
+      : a.unavailable ? '<span class="chip err">unavailable</span>'
+      : a.status === "error" ? '<span class="chip err">error</span>'
+      : a.status === "active" ? '<span class="chip hit">active</span>'
+      : `<span class="chip">${esc(a.status || "-")}</span>`;
+    return `<tr class="${cls}">
+      <td class="pick"><input type="checkbox" data-name="${esc(a.name)}" ${selected.has(a.name) ? "checked" : ""}></td>
+      <td><div class="name">${esc(a.name)}</div>${a.email ? `<div class="ver">${esc(a.email)}</div>` : ""}</td>
+      <td>${esc(a.provider || "-")}</td>
+      <td>${statusChip}</td>
+      <td>${a.priority || ""}</td>
+    </tr>`;
+  }).join("");
+  tbody.querySelectorAll("input[type=checkbox][data-name]").forEach(cb => {
+    cb.addEventListener("change", () => {
+      const name = cb.getAttribute("data-name");
+      if (cb.checked) selected.add(name); else selected.delete(name);
+      renderAccounts(); renderPreviewCandChip();
+    });
+  });
+  $("accAll").checked = rows.length > 0 && rows.every(a => selected.has(a.name));
+  renderPreviewCandChip();
+}
+
+function renderPreviewCandChip(){ $("pvCand").textContent = selected.size + " 个候选"; }
+
+/* ---- 读取插件状态 ---- */
+async function loadStatus(){
+  const data = await call(PLUGIN_API + "/status");
+  strategies = (data && data.strategies) || [];
+  rules = normalizeRules((data && data.rules) || []);
+  savedRules = JSON.parse(JSON.stringify(rules));
+  $("ver").textContent = data && data.version ? ("v" + data.version) : "";
+  $("stratHint").textContent = strategies.length ? ("本 build 支持: " + strategies.join(" / ")) : "";
+  fillStrategies();
+  renderRules();
+  fillPreviewModels();
+  markClean(!!(data && data.configured));
+}
+
+// 插件 /status 返回的是数组,面板内部用 map 编辑。
+function normalizeRules(list){
+  const out = {};
+  (list || []).forEach(r => {
+    if (!r || !r.model) return;
+    out[r.model] = {
+      strategy: r.strategy || "",
+      provider_group_by: r.provider_group_by || "",
+      provider_weights: r.provider_weights || {}
+    };
+  });
+  return out;
+}
+
+function fillStrategies(){
+  const sel = $("pvStrategy");
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">（用规则里的策略）</option>' +
+    strategies.map(s => `<option value="${esc(s)}">${esc(STRATEGY_LABEL[s] || s)}</option>`).join("");
+  sel.value = keep;
+}
+
+function renderRules(){
+  const models = Object.keys(rules).sort();
+  $("ruleCnt").textContent = models.length + " 条";
+  const tbody = $("ruleRows");
+  if (!models.length) {
+    tbody.innerHTML = '<tr><td colspan="3" class="empty">还没有规则。没有规则的模型由 CPA 内置调度处理。</td></tr>';
+    fillPreviewModels();
+    return;
+  }
+  tbody.innerHTML = models.map(model => {
+    const rule = rules[model] || {};
+    const opts = strategies.map(s =>
+      `<option value="${esc(s)}" ${s === rule.strategy ? "selected" : ""}>${esc(STRATEGY_LABEL[s] || s)}</option>`).join("");
+    const unknown = rule.strategy && strategies.indexOf(rule.strategy) < 0
+      ? `<option value="${esc(rule.strategy)}" selected>${esc(rule.strategy)}（本 build 不支持）</option>` : "";
+    const weights = rule.provider_weights && Object.keys(rule.provider_weights).length
+      ? `<div class="ver">weights: ${esc(JSON.stringify(rule.provider_weights))}</div>` : "";
+    return `<tr>
+      <td><div class="name">${esc(model)}</div>${weights}</td>
+      <td><select data-model="${esc(model)}">${unknown}${opts}</select></td>
+      <td class="act"><button class="mini" data-del="${esc(model)}">删除</button></td>
+    </tr>`;
+  }).join("");
+  tbody.querySelectorAll("select[data-model]").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const model = sel.getAttribute("data-model");
+      if (rules[model]) rules[model].strategy = sel.value;
+      markDirty();
+    });
+  });
+  tbody.querySelectorAll("button[data-del]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      delete rules[btn.getAttribute("data-del")];
+      markDirty(); renderRules();
+    });
+  });
+  fillPreviewModels();
+}
+
+function fillPreviewModels(){
+  const sel = $("pvModel");
+  const keep = sel.value;
+  const models = Object.keys(rules).sort();
+  sel.innerHTML = models.length
+    ? models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join("")
+    : '<option value="">（先添加一条规则）</option>';
+  if (keep && models.indexOf(keep) >= 0) sel.value = keep;
+}
+
+/* ---- 保存规则 ---- */
+async function saveRules(){
+  const payload = {};
+  Object.keys(rules).sort().forEach(model => {
+    const rule = rules[model] || {};
+    if (!rule.strategy) return;
+    const entry = { strategy: rule.strategy };
+    if (rule.provider_group_by) entry["provider-group-by"] = rule.provider_group_by;
+    if (rule.provider_weights && Object.keys(rule.provider_weights).length) {
+      entry["provider-weights"] = rule.provider_weights;
+    }
+    payload[model] = entry;
+  });
+  await call(PLUGIN_CONFIG_PATH, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rules: payload })
+  });
+  savedRules = JSON.parse(JSON.stringify(rules));
+  markClean(Object.keys(payload).length > 0);
+  toast("ok", "已保存 " + Object.keys(payload).length + " 条规则");
+  // 配置变更会让宿主重新 configure 插件,重新拉一次确认线上状态。
+  loadStatus().catch(() => {});
+}
+
+/* ---- 试算 ---- */
+function candidatePayload(){
+  return accounts.filter(a => selected.has(a.name)).map(a => ({
+    ID: a.name,
+    Provider: a.provider,
+    Priority: a.priority || 0,
+    Status: a.status,
+    Attributes: a.email ? { email: a.email } : {}
+  }));
+}
+
+async function runPreview(){
+  const model = $("pvModel").value;
+  if (!model) { toast("err", "先添加一条规则并选择模型"); return; }
+  const cands = candidatePayload();
+  if (!cands.length) { toast("err", "先在左侧勾选至少一个账号"); return; }
+  const body = {
+    model: model,
+    strategy: $("pvStrategy").value,
+    iterations: parseInt($("pvIter").value, 10) || 8,
+    candidates: cands
+  };
+  const data = await call(PLUGIN_API + "/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  renderPreview(data);
+}
+
+function renderPreview(data){
+  const steps = (data && data.steps) || [];
+  const box = $("pvSteps");
+  if (!steps.length) { box.className = "empty"; box.textContent = "没有结果。"; return; }
+  box.className = "";
+  box.innerHTML = steps.map(s => {
+    if (s.auth_id) return `<span class="stage-step">#${s.index + 1} <b>${esc(shortName(s.auth_id))}</b></span>`;
+    if (s.delegate_builtin) return `<span class="stage-step">#${s.index + 1} 委托内置 <b>${esc(s.delegate_builtin)}</b></span>`;
+    return `<span class="stage-step miss">#${s.index + 1} 不接管（交回 CPA）</span>`;
+  }).join("");
+
+  const counts = (data && data.counts) || {};
+  const keys = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  const rows = keys.map(k => `<tr><td><div class="name">${esc(k)}</div></td><td>${counts[k]}</td></tr>`).join("");
+  let html = `<table class="grid"><thead><tr><th>账号</th><th>占比</th></tr></thead><tbody>${rows ||
+    '<tr><td colspan="2" class="empty">本次没有选中任何账号</td></tr>'}</tbody></table>`;
+
+  const facts = [];
+  facts.push(`模型 <code>${esc(data.model)}</code>`);
+  facts.push(`策略 <code>${esc(data.strategy || "-")}</code>`);
+  if (!data.configured) facts.push('<span class="chip none">该模型还没有规则</span>');
+  if (data.delegated) facts.push(`委托内置 <code>${esc(data.delegated)}</code>`);
+  if (data.handled === 0) facts.push('<span class="chip none">全部未接管</span>');
+  $("pvSummary").innerHTML = html + `<div class="note" style="background:transparent;border:0;padding:8px 0">${facts.join(" · ")}</div>`;
+}
+
+// 账号名是形如 codex-a3c633e0-wangzhixing567@gmail.com-pro.json 的长串,
+// 列表里只保留能区分彼此的部分。
+function shortName(name){
+  const base = String(name).replace(/\.json$/, "");
+  const parts = base.split("-");
+  if (parts.length >= 3 && parts[0] === "codex") return parts.slice(2).join("-") || base;
+  return base;
+}
+
+/* ---- 启动 ---- */
+async function boot(){
+  if (!getKey()) { showAuth(); return; }
+  $("apiPath").textContent = MANAGEMENT_BASE_PATH + "/plugins/" + PLUGIN_ID;
+  $("btnPreview").disabled = true;
+  try {
+    await loadAccounts();
+    await loadStatus();
+    $("btnPreview").disabled = false;
+  } catch (err) {
+    toast("err", err.message || String(err));
+  }
+}
+
+$("accFilter").addEventListener("input", renderAccounts);
+$("accProvider").addEventListener("change", renderAccounts);
+$("accOnlyUsable").addEventListener("change", renderAccounts);
+$("accAll").addEventListener("change", () => {
+  const rows = visibleAccounts();
+  if ($("accAll").checked) rows.forEach(a => selected.add(a.name));
+  else rows.forEach(a => selected.delete(a.name));
+  renderAccounts();
+});
+$("btnAccReload").addEventListener("click", () => loadAccounts().catch(e => toast("err", e.message)));
+$("btnAddRule").addEventListener("click", () => {
+  const model = $("newModel").value.trim();
+  if (!model) { toast("err", "请输入模型 ID"); return; }
+  if (rules[model]) { toast("err", "该模型已有规则"); return; }
+  rules[model] = { strategy: strategies[0] || "fill-first", provider_group_by: "", provider_weights: {} };
+  $("newModel").value = "";
+  markDirty(); renderRules();
+  $("pvModel").value = model;
+});
+$("newModel").addEventListener("keydown", e => { if (e.key === "Enter") $("btnAddRule").click(); });
+$("btnSaveRules").addEventListener("click", () => saveRules().catch(e => toast("err", e.message)));
+$("btnRevertRules").addEventListener("click", () => {
+  rules = JSON.parse(JSON.stringify(savedRules));
+  renderRules(); markClean(Object.keys(rules).length > 0);
+});
+$("btnPreview").addEventListener("click", () => runPreview().catch(e => toast("err", e.message)));
+$("btnUseConfig").addEventListener("click", () => boot().catch(e => toast("err", e.message)));
+
+window.__ssThemeSync && window.__ssThemeSync();
+if (getKey()) boot(); else showAuth();
+</script>
+</body>
+</html>

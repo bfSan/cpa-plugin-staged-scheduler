@@ -3,10 +3,41 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
+
+// Plugin identity. The name is what the CPA plugin list shows; the repository
+// URL is what an operator follows to find the source of a build they did not
+// install themselves.
+const (
+	pluginMetadataName = "Staged Account Scheduler"
+	pluginVersion      = "0.1.0"
+	pluginAuthor       = "bfSan"
+	pluginRepoURL      = "https://github.com/bfSan/cpa-plugin-staged-scheduler"
+)
+
+// supportedStrategies is the exact set this build accepts, in the order the panel
+// offers them. Validation and the panel both read this list, so a strategy
+// cannot be advertised in the UI without being implemented in Pick.
+var supportedStrategies = []string{
+	strategyFillFirst,
+	strategyRoundRobin,
+	strategyProviderWeightedRoundRobin,
+}
+
+// isSupportedStrategy reports whether Pick implements the named strategy.
+func isSupportedStrategy(strategy string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(strategy))
+	for _, candidate := range supportedStrategies {
+		if candidate == normalized {
+			return true
+		}
+	}
+	return false
+}
 
 type rpcEnvelope struct {
 	OK     bool            `json:"ok"`
@@ -30,7 +61,8 @@ type registration struct {
 }
 
 type registrationCapability struct {
-	Scheduler bool `json:"scheduler"`
+	Scheduler     bool `json:"scheduler"`
+	ManagementAPI bool `json:"management_api"`
 }
 
 var activeScheduler = newSchedulerPlugin()
@@ -54,6 +86,25 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 			return nil, fmt.Errorf("decode scheduler request: %w", err)
 		}
 		return okEnvelope(activeScheduler.Pick(schedulerRequest))
+	case pluginabi.MethodManagementRegister:
+		// The host passes the prefixes it wants this plugin to serve under.
+		// Capturing them here is what lets the panel call back into the right
+		// management base path when CPA mounts it somewhere other than the
+		// historical /v0/management.
+		var registrationRequest pluginapi.ManagementRegistrationRequest
+		if len(request) > 0 {
+			if err := json.Unmarshal(request, &registrationRequest); err == nil {
+				if registrationRequest.BasePath != "" {
+					setManagementBasePath(registrationRequest.BasePath)
+				}
+				if registrationRequest.ResourceBasePath != "" {
+					setResourceBasePath(registrationRequest.ResourceBasePath)
+				}
+			}
+		}
+		return okEnvelope(managementRegistration())
+	case pluginabi.MethodManagementHandle:
+		return handleManagement(request)
 	default:
 		return errorEnvelope("unknown_method", "unknown method: "+method)
 	}
@@ -63,17 +114,22 @@ func pluginRegistration() registration {
 	return registration{
 		SchemaVersion: pluginabi.SchemaVersion,
 		Metadata: pluginapi.Metadata{
-			Name:             "Staged Account Scheduler",
-			Version:          "0.1.0",
-			Author:           "bfSan",
-			GitHubRepository: "https://github.com/bfSan/cpa-plugin-staged-scheduler",
-			ConfigFields: []pluginapi.ConfigField{{
-				Name:        "rules",
-				Type:        pluginapi.ConfigFieldTypeObject,
-				Description: "Exact model IDs mapped to scheduler strategy and optional provider weights.",
-			}},
+			Name:             pluginMetadataName,
+			Version:          pluginVersion,
+			Author:           pluginAuthor,
+			GitHubRepository: pluginRepoURL,
+			ConfigFields: []pluginapi.ConfigField{
+				{
+					Name:        "rules",
+					Type:        pluginapi.ConfigFieldTypeObject,
+					Description: "Exact model IDs mapped to a scheduler strategy and its options.",
+				},
+			},
 		},
-		Capabilities: registrationCapability{Scheduler: true},
+		Capabilities: registrationCapability{
+			Scheduler:     true,
+			ManagementAPI: true,
+		},
 	}
 }
 
