@@ -28,7 +28,7 @@ plugins:
   enabled: true
   dir: "plugins"
   configs:
-    cliproxy-model-policy-scheduler:
+    staged-scheduler:
       enabled: true
       priority: 100
       rules:
@@ -62,11 +62,11 @@ make verify
 make build
 ```
 
-`make build` produces `dist/cliproxy-model-policy-scheduler.so` for Linux AMD64.
+`make build` produces `dist/staged-scheduler.so` for Linux AMD64.
 
 ## Local CLIProxyAPI integration
 
-Mount the built library at `/CLIProxyAPI/plugins/cliproxy-model-policy-scheduler.so`, enable plugins globally, and configure `plugins.configs.cliproxy-model-policy-scheduler`.
+Mount the built library at `/CLIProxyAPI/plugins/staged-scheduler.so`, enable plugins globally, and configure `plugins.configs.staged-scheduler`.
 
 After startup, request `GET /v0/management/plugins` with the existing management authentication and confirm this plugin reports `registered: true` and `effective_enabled: true`.
 
