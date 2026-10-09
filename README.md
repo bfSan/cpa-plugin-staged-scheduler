@@ -2,6 +2,10 @@
 
 Model-aware scheduler plugin for CLIProxyAPI. It keeps the host scheduler as the default and overrides only exact model IDs declared in plugin configuration.
 
+> Fork of [abdwhb-png/cliproxy-model-policy-scheduler](https://github.com/abdwhb-png/cliproxy-model-policy-scheduler), maintained at
+> [bfSan/cpa-plugin-policy-scheduler](https://github.com/bfSan/cpa-plugin-policy-scheduler). The original repository is wired as the
+> `upstream` remote; upstream keeps the original design, this fork is where our changes land.
+
 ## Why
 
 CLIProxyAPI routing strategy is global. This plugin allows models with different cost or fairness requirements to use different credential policies without modifying the CLIProxyAPI fork.

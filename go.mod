@@ -1,4 +1,4 @@
-module github.com/abdwhb-png/cliproxy-model-policy-scheduler
+module github.com/bfSan/cpa-plugin-policy-scheduler
 
 go 1.26.4
 

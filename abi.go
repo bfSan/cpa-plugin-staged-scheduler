@@ -65,8 +65,8 @@ func pluginRegistration() registration {
 		Metadata: pluginapi.Metadata{
 			Name:             "Model Policy Scheduler",
 			Version:          "0.1.0",
-			Author:           "abdwhb-png",
-			GitHubRepository: "https://github.com/abdwhb-png/cliproxy-model-policy-scheduler",
+			Author:           "bfSan",
+			GitHubRepository: "https://github.com/bfSan/cpa-plugin-policy-scheduler",
 			ConfigFields: []pluginapi.ConfigField{{
 				Name:        "rules",
 				Type:        pluginapi.ConfigFieldTypeObject,
