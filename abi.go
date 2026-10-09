@@ -26,6 +26,7 @@ var supportedStrategies = []string{
 	strategyFillFirst,
 	strategyRoundRobin,
 	strategyProviderWeightedRoundRobin,
+	strategyStaged,
 }
 
 // isSupportedStrategy reports whether Pick implements the named strategy.
@@ -61,8 +62,12 @@ type registration struct {
 }
 
 type registrationCapability struct {
-	Scheduler     bool `json:"scheduler"`
-	ManagementAPI bool `json:"management_api"`
+	Scheduler bool `json:"scheduler"`
+	// SchedulerAcrossPriorities is what makes the staged strategy possible: with
+	// it off, the host offers only the highest priority tier, so a ladder could
+	// never reach B, C, D or E.
+	SchedulerAcrossPriorities bool `json:"scheduler_across_priorities,omitempty"`
+	ManagementAPI             bool `json:"management_api"`
 }
 
 var activeScheduler = newSchedulerPlugin()
@@ -127,8 +132,11 @@ func pluginRegistration() registration {
 			},
 		},
 		Capabilities: registrationCapability{
-			Scheduler:     true,
-			ManagementAPI: true,
+			Scheduler: true,
+			// The staged ladder is defined over accounts that may sit on
+			// different priority tiers, so the plugin must see all of them.
+			SchedulerAcrossPriorities: true,
+			ManagementAPI:             true,
 		},
 	}
 }

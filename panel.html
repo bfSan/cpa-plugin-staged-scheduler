@@ -50,15 +50,16 @@ header{background:var(--card);border-bottom:1px solid var(--border);
 header h1{font-size:16px;margin:0;font-weight:600}
 .ver{color:var(--mut);font-size:12px}
 .spacer{flex:1 1 auto}
-main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;padding:16px;max-width:1560px;margin:0 auto}
-@media (max-width:1040px){main{grid-template-columns:minmax(0,1fr)}}
+main{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:14px;padding:16px;max-width:1660px;margin:0 auto;align-items:start}
+@media (max-width:1100px){main{grid-template-columns:minmax(0,1fr)}}
 .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-md);
   overflow:hidden;display:flex;flex-direction:column;min-width:0}
 .card>h2{margin:0;padding:12px 14px;font-size:14px;font-weight:600;border-bottom:1px solid var(--border);
   display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .card>h2 .hint{font-weight:400;color:var(--mut);font-size:12px}
 .bar{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.body{padding:10px 14px;overflow:auto;max-height:58vh}
+.body{padding:10px 14px;overflow:auto;max-height:56vh}
+.body.tall{max-height:70vh}
 .note{color:var(--mut);font-size:12px;padding:8px 14px;border-top:1px solid var(--border);background:var(--surface)}
 button{font:inherit;font-size:13px;background:var(--btn-sec);color:var(--fg);border:1px solid var(--border);
   border-radius:8px;padding:7px 12px;cursor:pointer;white-space:nowrap}
@@ -71,28 +72,88 @@ input[type=text],input[type=search],input[type=password],input[type=number],sele
   background:var(--input-bg);color:var(--fg);border:1px solid var(--border);border-radius:8px;
   padding:7px 10px;min-width:0;max-width:100%}
 input::placeholder{color:var(--placeholder)}
-input.grow{flex:1 1 160px}
+input.grow{flex:1 1 140px}
 label.chk{display:flex;align-items:center;gap:6px;color:var(--mut);user-select:none;font-size:13px}
 .chip{display:inline-block;background:var(--mut-soft);border:1px solid var(--mut-border);border-radius:99px;
   padding:2px 9px;font-size:11px;font-weight:600;color:var(--mut);white-space:nowrap}
 .chip.hit{color:var(--ok);background:var(--ok-soft);border-color:var(--ok-border)}
 .chip.none{color:var(--warn);background:var(--warn-soft);border-color:var(--warn-border)}
 .chip.err{color:var(--err);background:var(--err-soft);border-color:var(--err-border)}
-table.grid{width:100%;border-collapse:collapse;font-size:12px}
-table.grid th{text-align:left;font-weight:600;color:var(--mut);font-size:11px;padding:4px 8px;
-  border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--card);z-index:1}
-table.grid td{padding:5px 8px;border-bottom:1px dashed var(--border);vertical-align:middle;overflow-wrap:anywhere}
-table.grid tr:last-child td{border-bottom:0}
-table.grid td.pick{width:30px}
-table.grid td.act{width:1%;white-space:nowrap;text-align:right}
-table.grid tr.off{color:var(--mut)}
-table.grid tr.off .name{text-decoration:line-through}
-table.grid tr.sel{background:var(--acc-ring)}
-.stage-step{display:inline-flex;align-items:center;gap:6px;margin:0 6px 6px 0;padding:4px 8px;
-  border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:12px}
+.empty{color:var(--mut);padding:16px 2px;font-size:13px;text-align:center}
+/* 账号池 */
+ul.pool{margin:0;padding:0;list-style:none}
+ul.pool li{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border);min-width:0}
+ul.pool li:last-child{border-bottom:0}
+ul.pool li.off{color:var(--mut)}
+ul.pool li.picked{background:var(--acc-ring);border-radius:6px}
+ul.pool .who{min-width:0;flex:1 1 auto}
+ul.pool .who .name{font-size:12px;overflow-wrap:anywhere}
+ul.pool .meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:2px}
+/* 规则列表 */
+ul.rules{margin:0;padding:0;list-style:none}
+ul.rules li{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px dashed var(--border);
+  cursor:pointer;border-radius:6px;min-width:0}
+ul.rules li:last-child{border-bottom:0}
+ul.rules li.on{background:var(--acc-ring);font-weight:600}
+ul.rules .m{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;font-size:13px}
+/* stage 编排 */
+.stage{border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:10px;background:var(--surface)}
+.stage.lead{border-color:var(--acc)}
+.stage-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.stage-head .idx{width:22px;height:22px;border-radius:50%;background:var(--acc);color:var(--on-acc);
+  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex:0 0 auto}
+.stage-head .flow{color:var(--mut);font-size:12px}
+.accs{max-height:150px;overflow:auto;border:1px solid var(--border);border-radius:8px;
+  background:var(--card);padding:6px 8px;margin-top:6px}
+.accs label{display:flex;align-items:center;gap:6px;padding:2px 0;font-size:12px;min-width:0}
+.accs label .name{overflow-wrap:anywhere;min-width:0}
+.accs label .w{margin-left:auto;flex:0 0 auto;display:flex;align-items:center;gap:4px;color:var(--mut);font-size:11px}
+.accs input[type=number]{width:62px;padding:2px 6px;font-size:12px}
+.stage-note{font-size:11px;color:var(--mut);margin-top:6px}
+
+/* 试算结果:每次选择一个 chip,按顺序逐个淡入,肉眼能跟着看节奏 */
+.stage-step{display:inline-flex;align-items:center;gap:6px;margin:0 6px 6px 0;padding:4px 9px;
+  border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:12px;
+  animation:ss-pop .28s cubic-bezier(.2,.9,.3,1.15) both;animation-delay:calc(var(--i,0) * 28ms)}
 .stage-step b{color:var(--acc);font-weight:600}
 .stage-step.miss{color:var(--mut);border-style:dashed}
-.empty{color:var(--mut);padding:16px 2px;font-size:13px;text-align:center}
+@keyframes ss-pop{from{opacity:0;transform:translateY(4px) scale(.96)}to{opacity:1;transform:none}}
+
+/* 试算结果里的占比表 */
+table.grid{width:100%;border-collapse:collapse;font-size:12px}
+table.grid th{text-align:left;font-weight:600;color:var(--mut);font-size:11px;
+  padding:4px 8px;border-bottom:1px solid var(--border)}
+table.grid td{padding:5px 8px;border-bottom:1px dashed var(--border);vertical-align:top;overflow-wrap:anywhere}
+table.grid tr:last-child td{border-bottom:0}
+
+/* 新增阶段时轻轻落下来,而不是突然出现 */
+.stage{animation:ss-drop .22s ease-out both}
+@keyframes ss-drop{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+
+/* 首段是当前正在"烧"的账号,落定后呼吸三次提示它,之后不再抢注意力 */
+.stage.lead{animation:ss-drop .22s ease-out both,ss-hold 1.5s ease-in-out .3s 3}
+@keyframes ss-hold{0%,100%{box-shadow:0 0 0 0 var(--acc-ring)}50%{box-shadow:0 0 0 4px var(--acc-ring)}}
+
+/* 请求进行中:按钮文字让位给转圈 */
+button.busy{position:relative;color:transparent!important}
+button.busy>b,button.busy::after{content:""}
+button.busy::after{position:absolute;inset:0;margin:auto;width:13px;height:13px;
+  border:2px solid var(--fg);border-top-color:transparent;border-radius:50%;
+  animation:ss-spin .7s linear infinite}
+button.primary.busy::after{border-color:var(--on-acc);border-top-color:transparent}
+@keyframes ss-spin{to{transform:rotate(360deg)}}
+
+/* 试算进行中的占位脉冲,避免旧结果被误读成本次结果 */
+.skeleton{display:inline-block;width:74px;height:22px;margin:0 6px 6px 0;border-radius:8px;
+  background:linear-gradient(90deg,var(--surface-muted) 25%,var(--surface) 37%,var(--surface-muted) 63%);
+  background-size:400% 100%;animation:ss-shimmer 1.3s ease-in-out infinite}
+@keyframes ss-shimmer{from{background-position:100% 0}to{background-position:0 0}}
+
+/* 系统开了"减弱动效"就全部让路 */
+@media (prefers-reduced-motion: reduce){
+  *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+}
+
 #auth{padding:10px 16px;background:var(--warn-soft);border-bottom:1px solid var(--warn-border);
   color:var(--warn);display:none;gap:8px;align-items:center;flex-wrap:wrap}
 #toasts{position:fixed;top:16px;right:16px;display:flex;flex-direction:column;gap:10px;z-index:9999;max-width:360px}
@@ -103,6 +164,8 @@ table.grid tr.sel{background:var(--acc-ring)}
 .toast.show{transform:translateX(0);opacity:1}
 .toast.ok{border-left-color:var(--ok);background:var(--ok-soft)}
 .toast.err{border-left-color:var(--err);background:var(--err-soft)}
+pre.dump{background:var(--code-bg);color:var(--code-fg);border-radius:8px;padding:10px;
+  font-size:11px;overflow:auto;margin:0;max-height:220px}
 @media (max-width:640px){header{padding:10px 12px}main{padding:12px;gap:12px}}
 </style>
 <script>
@@ -139,7 +202,7 @@ table.grid tr.sel{background:var(--acc-ring)}
   <h1>分阶段账号调度</h1><span class="ver" id="ver"></span>
   <span class="chip" id="src">未配置规则</span>
   <span class="spacer"></span>
-  <span class="hint ver" id="stratHint"></span>
+  <span class="ver" id="stratHint"></span>
 </header>
 
 <div id="auth">
@@ -158,64 +221,81 @@ table.grid tr.sel{background:var(--acc-ring)}
       <input type="search" class="grow" id="accFilter" placeholder="筛选账号 / 邮箱">
       <select id="accProvider"><option value="">全部 provider</option></select>
       <label class="chk"><input type="checkbox" id="accOnlyUsable">只看可用</label>
+      <label class="chk"><input type="checkbox" id="accOnlyModel">只看支持所选模型</label>
       <button class="mini" id="btnAccReload">重新读取</button>
     </div>
-    <div class="body"><table class="grid" id="accTable">
-      <thead><tr>
-        <th class="pick"><input type="checkbox" id="accAll"></th>
-        <th>name</th><th>provider</th><th>状态</th><th>优先级</th>
-      </tr></thead>
-      <tbody id="accRows"></tbody>
-    </table></div>
-    <div class="note">
-      数据来自 CPA 的 <code>/v0/management/auth-files</code>,这里只读。勾选账号用于右侧试算,
-      不会修改任何凭据。Cooldown / disabled 的账号在实际请求里已经被 CPA 从候选里剔除,
-      所以「烧干一个号再换下一个」不需要插件自己判额度。
+    <div class="body tall">
+      <ul class="pool" id="accRows"></ul>
+    </div>
+    <div class="note" id="accNote">
+      数据来自 CPA 的 <code>/v0/management/auth-files</code> 与
+      <code>/v0/management/auth-files/models</code>,都是只读的本地查询,不会访问上游、不消耗额度。
+      「支持所选模型」是按 CPA 已注册的模型目录判断的。
     </div>
   </section>
 
   <!-- 规则 -->
-  <section class="card">
-    <h2>调度规则 <span class="hint">按模型 ID 精确匹配</span>
-      <span class="spacer"></span><span class="chip" id="ruleCnt"></span></h2>
-    <div class="bar">
-      <input type="text" class="grow" id="newModel" placeholder="模型 ID,如 gpt-6.1-sol">
-      <button id="btnAddRule">添加规则</button>
-      <span class="spacer"></span>
-      <button class="primary" id="btnSaveRules" disabled>保存到 CPA</button>
-      <button id="btnRevertRules" disabled>放弃改动</button>
-    </div>
-    <div class="body"><table class="grid" id="ruleTable">
-      <thead><tr><th>模型</th><th>策略</th><th class="act"></th></tr></thead>
-      <tbody id="ruleRows"></tbody>
-    </table></div>
-    <div class="note">
-      保存走 CPA 的 <code>/v0/management/plugins/staged-scheduler/config</code>,用的是你填的管理密钥;
-      插件自己既不持有密钥也不落盘别名之外的任何东西。没有规则的模型一律交回 CPA 内置调度,
-      不会被这个插件改写。
-    </div>
-  </section>
+  <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+    <section class="card">
+      <h2>规则 <span class="hint">按模型 ID 精确匹配,模型 ID 就是客户端请求的那个字符串</span>
+        <span class="spacer"></span><span class="chip" id="ruleCnt"></span></h2>
+      <div class="bar">
+        <select id="newModel" class="grow" multiple size="6" title="按住 Ctrl / Cmd 多选：选中的模型共用同一套规则"></select>
+        <input type="text" id="newModelCustom" placeholder="自定义模型 ID" style="display:none;flex:1 1 160px">
+        <button id="btnAddRule">新建规则</button>
+        <span class="spacer"></span>
+        <button class="primary" id="btnSaveRules" disabled>保存到 CPA</button>
+        <button id="btnRevertRules" disabled>放弃改动</button>
+      </div>
+      <div class="bar" style="border-bottom:0;padding-top:0">
+        <span class="ver">可多选：第一个作为规则名，其余作为别名共用同一套阶梯（省得逐条复制）</span>
+      </div>
+      <div class="body" style="max-height:200px">
+        <ul class="rules" id="ruleRows"></ul>
+      </div>
+      <div class="note">
+        保存走 CPA 的 <code>/v0/management/plugins/staged-scheduler/config</code>,用的是你填的管理密钥。
+        没有规则的模型一律交回 CPA 内置调度,不会被这个插件改写。
+      </div>
+    </section>
 
-  <!-- 试算 -->
-  <section class="card" style="grid-column:1/-1">
-    <h2>试算 <span class="hint">用插件同一套选择代码离线重放,不推进线上游标</span>
-      <span class="spacer"></span><span class="chip" id="pvCand"></span></h2>
-    <div class="bar">
-      <select id="pvModel"></select>
-      <select id="pvStrategy"></select>
-      <label class="chk">次数 <input type="number" id="pvIter" value="8" min="1" max="200" style="width:72px"></label>
-      <button class="primary" id="btnPreview">开始试算</button>
-      <span class="spacer"></span>
-      <button class="mini" id="btnUseConfig" title="把规则与账号池重新代入试算">重新读取配置与账号</button>
-    </div>
-    <div class="body">
-      <div id="pvSteps" class="empty">选好模型与账号后点「开始试算」。</div>
-      <div id="pvSummary" style="margin-top:10px"></div>
-    </div>
-    <div class="note" id="pvNote">
-      试算在插件的独立副本上跑,不会动线上轮转位置,也不发任何上游请求。
-    </div>
-  </section>
+    <section class="card" id="editorCard">
+      <h2>规则详情 <span class="hint" id="editHint">从上面选一条规则</span>
+        <span class="spacer"></span><span class="chip" id="editAvail"></span></h2>
+      <div class="bar">
+        <label class="chk">策略</label>
+        <select id="editStrategy" style="flex:1 1 220px"></select>
+        <span class="spacer"></span>
+        <button class="mini" id="btnStageAdd">添加阶段</button>
+        <button class="mini" id="btnAutoLadder" title="按该模型可用账号自动生成一条阶梯">自动编排</button>
+      </div>
+      <div class="bar" id="unlistedBar" style="display:none">
+        <label class="chk"><input type="checkbox" id="editUnlisted">最后的阶段也吸收未列出的账号(兜底池)</label>
+      </div>
+      <div class="body tall" id="editorBody">
+        <div class="empty">先选一条规则,或新建一条。</div>
+      </div>
+      <div class="note" id="editorNote"></div>
+    </section>
+
+    <section class="card">
+      <h2>试算 <span class="hint">用插件同一套选择代码离线重放,不推进线上游标、不发上游请求</span>
+        <span class="spacer"></span><span class="chip" id="pvCand"></span></h2>
+      <div class="bar">
+        <select id="pvModel" style="flex:1 1 200px"></select>
+        <select id="pvStrategy"></select>
+        <label class="chk">次数 <input type="number" id="pvIter" value="8" min="1" max="200" style="width:72px"></label>
+        <button class="primary" id="btnPreview">开始试算</button>
+      </div>
+      <div class="body">
+        <div id="pvSteps" class="empty">选好模型后点「开始试算」。</div>
+        <div id="pvSummary" style="margin-top:10px"></div>
+      </div>
+      <div class="note">
+        试算的候选来自左侧账号池里「该模型可用」的账号(勾选项)，在插件的独立副本上运行。
+      </div>
+    </section>
+  </div>
 </main>
 
 <div id="toasts"></div>
@@ -231,6 +311,9 @@ const MANAGEMENT_BASE_PATH = __SS_MANAGEMENT_BASE_PATH_JSON__;
 const PLUGIN_ID = "staged-scheduler";
 const PLUGIN_API = MANAGEMENT_BASE_PATH + "/plugins/" + PLUGIN_ID;
 const PLUGIN_CONFIG_PATH = PLUGIN_API + "/config";
+const AUTH_FILES_PATH = MANAGEMENT_BASE_PATH + "/auth-files";
+const MODELS_PATH = MANAGEMENT_BASE_PATH + "/auth-files/models";
+const ALIAS_PATH = MANAGEMENT_BASE_PATH + "/oauth-model-alias";
 
 /* ---- 管理密钥: URL ?key= > sessionStorage > CPA 主面板 localStorage ---- */
 const ENC_PREFIX = "enc::v1::";
@@ -309,18 +392,26 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 /* ---- 状态 ---- */
-let accounts = [];          // 来自 CPA 的凭据列表
-let selected = new Set();   // 勾选的 name（= candidate ID）
-let rules = {};             // model -> rule（本地编辑态）
-let savedRules = {};        // 上次保存成功的快照，用于 dirty 判定
-let strategies = [];        // 插件支持的策略
+let accounts = [];            // CPA 凭据（含可用性）
+let aliases = [];             // {alias, name, channel}
+let modelCatalog = null;      // Map<凭据name, Set<模型id>>
+let allModelIds = [];         // 排序后的全部模型 id
+let rules = {};               // model -> rule 配置（本地编辑态）
+let savedRules = {};          // 保存成功的快照，用于 dirty
+let strategies = [];          // 插件支持的策略
+let editing = null;           // 当前编辑的模型
+let picked = new Set();       // 试算/编排使用的账号
 let dirty = false;
 
 const STRATEGY_LABEL = {
-  "fill-first": "fill-first（委托 CPA 内置）",
-  "round-robin": "round-robin（委托 CPA 内置）",
-  "provider-weighted-round-robin": "provider-weighted-round-robin（按 provider/base-url 分组加权轮转）",
-  "staged": "staged（按账号分阶段:先烧 A 再 B 再进池）"
+  "fill-first": "fill-first（委托 CPA 内置：一个号烧干再换）",
+  "round-robin": "round-robin（委托 CPA 内置：逐个轮转）",
+  "provider-weighted-round-robin": "provider-weighted-round-robin（按 provider/base-url 分组加权）",
+  "staged": "staged（按账号分阶段：先烧 A，再 B，最后进池）"
+};
+const MODE_LABEL = {
+  "first": "first（固定当前账号，烧干才换）",
+  "weighted-round-robin": "weighted-round-robin（组内按权重轮转）"
 };
 
 function markDirty(){
@@ -338,9 +429,11 @@ function markClean(configured){
   $("btnRevertRules").disabled = true;
 }
 
-/* ---- 读取账号池 ---- */
+/* ---- 账号池 ---- */
+const usable = a => !a.disabled && !a.unavailable && a.status !== "error" && a.status !== "disabled";
+
 async function loadAccounts(){
-  const data = await call(MANAGEMENT_BASE_PATH + "/auth-files");
+  const data = await call(AUTH_FILES_PATH);
   const files = (data && data.files) || [];
   accounts = files.map(f => ({
     name: f.name || f.id || "",
@@ -350,22 +443,49 @@ async function loadAccounts(){
     status: f.status || "",
     priority: (typeof f.priority === "number") ? f.priority : 0,
     disabled: !!f.disabled,
-    unavailable: !!f.unavailable,
-    source: f.source || ""
+    unavailable: !!f.unavailable
   })).filter(a => a.name);
   accounts.sort((a, b) => (a.provider + a.name).localeCompare(b.provider + b.name));
-
   fillProviders();
-  // 首次进入默认勾选 codex 里当前可用的账号 —— 这是最常见的工作集,
-  // 但仍然只是勾选,不改任何东西。
-  if (selected.size === 0) {
-    const codex = accounts.filter(a => a.provider === "codex" && usable(a));
-    (codex.length ? codex : accounts.filter(usable)).forEach(a => selected.add(a.name));
-  }
   renderAccounts();
 }
 
-const usable = a => !a.disabled && !a.unavailable && a.status !== "error" && a.status !== "disabled";
+// 每个凭据的模型目录由 CPA 的 registry 提供，纯本地读取。
+async function loadModelCatalog(){
+  if (modelCatalog) return;
+  const map = new Map();
+  await Promise.all(accounts.map(async a => {
+    try {
+      const d = await call(MODELS_PATH + "?name=" + encodeURIComponent(a.name));
+      const ids = ((d && d.models) || []).map(m => m.id).filter(Boolean);
+      map.set(a.name, new Set(ids));
+    } catch (_) {
+      map.set(a.name, new Set());
+    }
+  }));
+  modelCatalog = map;
+  const all = new Set();
+  map.forEach(set => set.forEach(id => all.add(id)));
+  allModelIds = Array.from(all).sort();
+  fillModelOptions();
+}
+
+// 凭据的模型目录里存的是上游真实模型名，而规则 key 往往是别名
+// （如 workbuddy-default ← default）。两者都要能查到账号，否则用别名建规则时
+// 会出现“0 个账号支持该模型”的假象。
+function upstreamNames(model){
+  if (!model) return [];
+  const names = [model];
+  aliases.forEach(a => { if (a.alias === model && a.name) names.push(a.name); });
+  return names;
+}
+
+function supportsModel(a, model){
+  if (!model || !modelCatalog) return true;
+  const set = modelCatalog.get(a.name);
+  if (!set) return true;
+  return upstreamNames(model).some(n => set.has(n));
+}
 
 function fillProviders(){
   const set = new Set(accounts.map(a => a.provider).filter(Boolean));
@@ -380,9 +500,11 @@ function visibleAccounts(){
   const q = $("accFilter").value.trim().toLowerCase();
   const prov = $("accProvider").value;
   const only = $("accOnlyUsable").checked;
+  const onlyModel = $("accOnlyModel").checked;
   return accounts.filter(a => {
     if (prov && a.provider !== prov) return false;
     if (only && !usable(a)) return false;
+    if (onlyModel && editing && !supportsModel(a, editing)) return false;
     if (!q) return true;
     return (a.name + " " + a.label + " " + a.email).toLowerCase().includes(q);
   });
@@ -391,40 +513,108 @@ function visibleAccounts(){
 function renderAccounts(){
   const rows = visibleAccounts();
   $("accCnt").textContent = rows.length + " / " + accounts.length;
-  const tbody = $("accRows");
+  const box = $("accRows");
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty">没有匹配的账号</td></tr>';
-    return;
+    box.innerHTML = '<li class="empty">没有匹配的账号</li>';
+  } else {
+    box.innerHTML = rows.map(a => {
+      const support = (editing && modelCatalog) ? (supportsModel(a, editing) ? '<span class="chip hit">支持</span>' : '<span class="chip err">不支持</span>') : "";
+      const statusChip = a.disabled ? '<span class="chip">disabled</span>'
+        : a.unavailable ? '<span class="chip err">unavailable</span>'
+        : a.status === "error" ? '<span class="chip err">error</span>'
+        : a.status === "active" ? '<span class="chip hit">active</span>'
+        : `<span class="chip">${esc(a.status || "-")}</span>`;
+      const cls = [usable(a) ? "" : "off", picked.has(a.name) ? "picked" : ""].filter(Boolean).join(" ");
+      return `<li class="${cls}">
+        <input type="checkbox" data-pick="${esc(a.name)}" ${picked.has(a.name) ? "checked" : ""}>
+        <span class="who">
+          <span class="name">${esc(a.name)}</span>
+          <span class="meta">${statusChip}<span class="ver">${esc(a.provider || "-")}</span>${support}</span>
+        </span>
+      </li>`;
+    }).join("");
   }
-  tbody.innerHTML = rows.map(a => {
-    const cls = [selected.has(a.name) ? "sel" : "", usable(a) ? "" : "off"].filter(Boolean).join(" ");
-    const statusChip = a.disabled ? '<span class="chip">disabled</span>'
-      : a.unavailable ? '<span class="chip err">unavailable</span>'
-      : a.status === "error" ? '<span class="chip err">error</span>'
-      : a.status === "active" ? '<span class="chip hit">active</span>'
-      : `<span class="chip">${esc(a.status || "-")}</span>`;
-    return `<tr class="${cls}">
-      <td class="pick"><input type="checkbox" data-name="${esc(a.name)}" ${selected.has(a.name) ? "checked" : ""}></td>
-      <td><div class="name">${esc(a.name)}</div>${a.email ? `<div class="ver">${esc(a.email)}</div>` : ""}</td>
-      <td>${esc(a.provider || "-")}</td>
-      <td>${statusChip}</td>
-      <td>${a.priority || ""}</td>
-    </tr>`;
-  }).join("");
-  tbody.querySelectorAll("input[type=checkbox][data-name]").forEach(cb => {
+  box.querySelectorAll("input[data-pick]").forEach(cb => {
     cb.addEventListener("change", () => {
-      const name = cb.getAttribute("data-name");
-      if (cb.checked) selected.add(name); else selected.delete(name);
-      renderAccounts(); renderPreviewCandChip();
+      const name = cb.getAttribute("data-pick");
+      if (cb.checked) picked.add(name); else picked.delete(name);
+      renderAccounts(); renderPreviewChip();
     });
   });
-  $("accAll").checked = rows.length > 0 && rows.every(a => selected.has(a.name));
-  renderPreviewCandChip();
+  renderPreviewChip();
 }
 
-function renderPreviewCandChip(){ $("pvCand").textContent = selected.size + " 个候选"; }
+function renderPreviewChip(){ $("pvCand").textContent = previewPool().length + " 个候选"; }
 
-/* ---- 读取插件状态 ---- */
+// 试算候选：勾选项中该模型可用的账号。模型不支持的直接排除，否则试算会
+// 显示一个线上永远不会发生的选择。
+function previewPool(){
+  return accounts.filter(a => picked.has(a.name) && supportsModel(a, editing || $("pvModel").value));
+}
+
+/* ---- 别名与模型下拉 ---- */
+async function loadAliases(){
+  try {
+    const d = await call(ALIAS_PATH);
+    const table = (d && (d["oauth-model-alias"] || d)) || {};
+    aliases = [];
+    Object.keys(table).forEach(channel => {
+      (table[channel] || []).forEach(row => {
+        if (row && row.alias) aliases.push({ alias: row.alias, name: row.name || "", channel });
+      });
+    });
+    aliases.sort((a, b) => a.alias.localeCompare(b.alias));
+  } catch (_) {
+    aliases = [];
+  }
+}
+
+function fillModelOptions(){
+  const groups = [];
+  if (aliases.length) {
+    groups.push('<optgroup label="别名（客户端实际请求的字符串）">' +
+      aliases.map(a => `<option value="${esc(a.alias)}">${esc(a.alias)}${a.name ? "  ← " + esc(a.name) : ""}</option>`).join("") +
+      '</optgroup>');
+  }
+  if (allModelIds.length) {
+    groups.push('<optgroup label="真实模型 ID（来自凭据模型目录）">' +
+      allModelIds.map(id => `<option value="${esc(id)}">${esc(id)}</option>`).join("") +
+      '</optgroup>');
+  }
+  groups.push('<optgroup label="其他"><option value="__custom__">自定义…</option></optgroup>');
+  $("newModel").innerHTML = groups.join("");
+  $("pvModel").innerHTML = groups.filter(g => !g.includes("__custom__")).join("");
+}
+
+$("newModel").addEventListener("change", () => {
+  const custom = Array.from($("newModel").selectedOptions).some(o => o.value === "__custom__");
+  $("newModelCustom").style.display = custom ? "" : "none";
+  if (custom) $("newModelCustom").focus();
+});
+
+/* ---- 规则 ---- */
+function normalizeRules(list){
+  const out = {};
+  (list || []).forEach(r => {
+    if (!r || !r.model) return;
+    // 插件只会列出操作者真正写下的规则；别名通过 shared_with 挂在它下面。
+    out[r.model] = {
+      strategy: r.strategy || "",
+      provider_group_by: r.provider_group_by || "",
+      provider_weights: r.provider_weights || {},
+      stages: (r.stages || []).map(s => ({
+        name: s.name || "",
+        mode: s.mode || "first",
+        accounts: (s.accounts || []).slice(),
+        weights: s.weights || {}
+      })),
+      unlisted: r.unlisted || "exclude",
+      sharedWith: (r.shared_with || []).slice()
+    };
+  });
+  return out;
+}
+
 async function loadStatus(){
   const data = await call(PLUGIN_API + "/status");
   strategies = (data && data.strategies) || [];
@@ -432,95 +622,328 @@ async function loadStatus(){
   savedRules = JSON.parse(JSON.stringify(rules));
   $("ver").textContent = data && data.version ? ("v" + data.version) : "";
   $("stratHint").textContent = strategies.length ? ("本 build 支持: " + strategies.join(" / ")) : "";
-  fillStrategies();
-  renderRules();
-  fillPreviewModels();
+  fillStrategySelects();
+  renderRuleList();
   markClean(!!(data && data.configured));
 }
 
-// 插件 /status 返回的是数组,面板内部用 map 编辑。
-function normalizeRules(list){
-  const out = {};
-  (list || []).forEach(r => {
-    if (!r || !r.model) return;
-    out[r.model] = {
-      strategy: r.strategy || "",
-      provider_group_by: r.provider_group_by || "",
-      provider_weights: r.provider_weights || {}
-    };
-  });
-  return out;
+function fillStrategySelects(){
+  const label = s => esc(STRATEGY_LABEL[s] || s);
+  const editKeep = $("editStrategy").value;
+  $("editStrategy").innerHTML = strategies.map(s => `<option value="${esc(s)}">${label(s)}</option>`).join("");
+  if (editKeep) $("editStrategy").value = editKeep;
+  const pvKeep = $("pvStrategy").value;
+  $("pvStrategy").innerHTML = '<option value="">（用规则里的策略）</option>' +
+    strategies.map(s => `<option value="${esc(s)}">${label(s)}</option>`).join("");
+  $("pvStrategy").value = pvKeep;
 }
 
-function fillStrategies(){
-  const sel = $("pvStrategy");
-  const keep = sel.value;
-  sel.innerHTML = '<option value="">（用规则里的策略）</option>' +
-    strategies.map(s => `<option value="${esc(s)}">${esc(STRATEGY_LABEL[s] || s)}</option>`).join("");
-  sel.value = keep;
-}
-
-function renderRules(){
+function renderRuleList(){
   const models = Object.keys(rules).sort();
   $("ruleCnt").textContent = models.length + " 条";
-  const tbody = $("ruleRows");
+  const box = $("ruleRows");
   if (!models.length) {
-    tbody.innerHTML = '<tr><td colspan="3" class="empty">还没有规则。没有规则的模型由 CPA 内置调度处理。</td></tr>';
-    fillPreviewModels();
+    box.innerHTML = '<li class="empty">还没有规则。没有规则的模型由 CPA 内置调度处理。</li>';
     return;
   }
-  tbody.innerHTML = models.map(model => {
+  box.innerHTML = models.map(model => {
     const rule = rules[model] || {};
-    const opts = strategies.map(s =>
-      `<option value="${esc(s)}" ${s === rule.strategy ? "selected" : ""}>${esc(STRATEGY_LABEL[s] || s)}</option>`).join("");
-    const unknown = rule.strategy && strategies.indexOf(rule.strategy) < 0
-      ? `<option value="${esc(rule.strategy)}" selected>${esc(rule.strategy)}（本 build 不支持）</option>` : "";
-    const weights = rule.provider_weights && Object.keys(rule.provider_weights).length
-      ? `<div class="ver">weights: ${esc(JSON.stringify(rule.provider_weights))}</div>` : "";
-    return `<tr>
-      <td><div class="name">${esc(model)}</div>${weights}</td>
-      <td><select data-model="${esc(model)}">${unknown}${opts}</select></td>
-      <td class="act"><button class="mini" data-del="${esc(model)}">删除</button></td>
-    </tr>`;
+    const detail = rule.strategy === "staged"
+      ? `${(rule.stages || []).length} 阶段: ${(rule.stages || []).map(s => s.mode === "first" ? "first" : "WRR").join(" → ")}`
+      : (STRATEGY_LABEL[rule.strategy] || rule.strategy || "未设策略");
+    // 与它共用同一套阶梯的别名：点开详情才能看到，但列表里得先让人知道存在。
+    const shared = (rule.sharedWith && rule.sharedWith.length)
+      ? `<span class="chip">+${rule.sharedWith.length} 别名</span>` : "";
+    return `<li data-model="${esc(model)}" class="${model === editing ? "on" : ""}">
+      <span class="m">${esc(model)} ${shared}<br><span class="ver">${esc(detail)}</span></span>
+      <button class="mini" data-del="${esc(model)}">删除</button>
+    </li>`;
   }).join("");
-  tbody.querySelectorAll("select[data-model]").forEach(sel => {
-    sel.addEventListener("change", () => {
-      const model = sel.getAttribute("data-model");
-      if (rules[model]) rules[model].strategy = sel.value;
+  box.querySelectorAll("li[data-model]").forEach(li => {
+    li.addEventListener("click", e => {
+      if (e.target.hasAttribute("data-del")) return;
+      editing = li.getAttribute("data-model");
+      renderRuleList(); renderEditor(); renderAccounts();
+      if (rules[editing]) $("pvModel").value = editing;
+    });
+  });
+  box.querySelectorAll("button[data-del]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const model = btn.getAttribute("data-del");
+      delete rules[model];
+      if (editing === model) editing = null;
+      markDirty(); renderRuleList(); renderEditor();
+    });
+  });
+}
+
+/* ---- 规则详情编辑器 ---- */
+function renderEditor(){
+  const card = $("editorBody");
+  const model = editing;
+  if (!model || !rules[model]) {
+    $("editHint").textContent = "从上面选一条规则";
+    $("editAvail").textContent = "";
+    $("unlistedBar").style.display = "none";
+    card.innerHTML = '<div class="empty">先选一条规则，或新建一条。</div>';
+    $("editorNote").textContent = "";
+    return;
+  }
+  const rule = rules[model];
+  $("editHint").textContent = model;
+  if ($("editStrategy").value !== rule.strategy) $("editStrategy").value = rule.strategy;
+  const avail = availableFor(model);
+  $("editAvail").textContent = modelCatalog ? (avail.length + " 个账号支持该模型") : "模型目录未加载";
+  $("unlistedBar").style.display = rule.strategy === "staged" ? "" : "none";
+  $("editUnlisted").checked = rule.unlisted === "include";
+
+  // 别名条：这条规则还覆盖哪些模型 ID。别名共用同一套阶梯，所以这里只改
+  // 名单，不复制阶梯内容。
+  card.innerHTML = aliasBarHtml(rule);
+  bindAliasBar(rule);
+
+  if (rule.strategy !== "staged") {
+    card.insertAdjacentHTML("beforeend", `<div class="note" style="background:transparent;border:0;padding:0">
+      <p>该策略由 CPA 内置选择器执行，插件只负责把匹配到的模型转交给它，没有需要在这里编排的内容。</p>
+      <p class="ver">如果要按账号分阶段（先烧 A、再 B、最后进池），把策略改成 <code>staged</code>。</p>
+    </div>`);
+    $("editorNote").textContent = "委托内置策略：选中账号后由 CPA 自己按该策略选择。";
+    return;
+  }
+
+  if (!rule.stages || !rule.stages.length) {
+    // 追加而不是覆盖：别名条已经渲染在 card 里了。
+    card.insertAdjacentHTML("beforeend", '<div class="empty">这条 staged 规则还没有阶段。点上方「自动编排」按可用账号生成一条阶梯。</div>');
+    $("editorNote").textContent = "";
+    return;
+  }
+
+  card.insertAdjacentHTML("beforeend", rule.stages.map((stage, i) => stageCard(stage, i, rule.stages.length)).join(""));
+  bindStageEvents(rule);
+  $("editorNote").innerHTML = avail.length
+    ? `可用账号 ${avail.length} 个：${esc(avail.map(a => shortName(a)).join("、"))}`
+    : `没有账号的模型目录包含 <code>${esc(model)}</code>；请确认模型 ID 写对了。`;
+}
+
+// aliasBarHtml 渲染“这条规则还覆盖哪些模型 ID”。别名与规则名共用同一套
+// 阶梯，所以这里只维护名单；加进来之后调度器对那个 ID 的请求就会走这条阶梯。
+function aliasBarHtml(rule){
+  const chips = (rule.sharedWith || []).map(m =>
+    `<span class="chip hit" style="margin-right:6px">${esc(m)}<button class="mini" data-alias-del="${esc(m)}" style="margin-left:6px;padding:0 5px">×</button></span>`
+  ).join("");
+  return `<div class="stage" style="background:var(--card)">
+    <div class="stage-head">
+      <b style="font-size:13px">共用这条规则的模型 ID</b>
+      <span class="ver">多选别名后，对它们的请求都会走下面这套阶梯</span>
+    </div>
+    <div style="margin:6px 0">${chips || '<span class="ver">（暂无别名，只有规则名本身）</span>'}</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="aliasPick" style="flex:1 1 220px"></select>
+      <button class="mini" id="btnAliasAdd">添加别名</button>
+    </div>
+    <div class="stage-note">
+      别名与规则名不能重复：如果某个 ID 已经是一条独立规则，插件会拒绝整份配置。
+      别名各自维护自己的轮转位置，两条流量不会互相干扰。
+    </div>
+  </div>`;
+}
+
+function bindAliasBar(rule){
+  const sel = $("aliasPick");
+  if (sel) {
+    // 候选 = 所有已知模型 ID 减去规则名与已有别名。
+    const taken = new Set([editing, ...(rule.sharedWith || [])]);
+    const options = [];
+    aliases.forEach(a => { if (!taken.has(a.alias)) options.push(a.alias); });
+    allModelIds.forEach(id => { if (!taken.has(id) && options.indexOf(id) < 0) options.push(id); });
+    sel.innerHTML = '<option value="">（选择要共用的模型 ID）</option>' +
+      options.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("") +
+      '<option value="__custom__">自定义…</option>';
+  }
+  const add = $("btnAliasAdd");
+  if (add) {
+    add.addEventListener("click", () => {
+      const value = $("aliasPick").value;
+      if (!value || value === "__custom__") { toast("err", "先在下拉里选一个模型 ID"); return; }
+      if (rules[value]) { toast("err", "该模型已有独立规则，不能作为别名"); return; }
+      rule.sharedWith = rule.sharedWith || [];
+      if (rule.sharedWith.indexOf(value) < 0) rule.sharedWith.push(value);
+      markDirty(); renderEditor(); renderRuleList();
+    });
+  }
+  document.querySelectorAll("button[data-alias-del]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const value = btn.getAttribute("data-alias-del");
+      rule.sharedWith = (rule.sharedWith || []).filter(x => x !== value);
+      markDirty(); renderEditor(); renderRuleList();
+    });
+  });
+}
+
+function stageCard(stage, index, total){
+  const avail = availableFor(editing);
+  const named = new Set(stage.accounts || []);
+  // 列出该阶段可选账号：可用账号优先，已被其他阶段占用的仍显示但标记，
+  // 否则用户会以为自己写错了。
+  const usedElsewhere = new Set();
+  (rules[editing].stages || []).forEach((s, i) => {
+    if (i !== index) (s.accounts || []).forEach(a => usedElsewhere.add(a));
+  });
+  return `<div class="stage ${index === 0 ? "lead" : ""}" data-stage="${index}">
+    <div class="stage-head">
+      <span class="idx">${index + 1}</span>
+      <input type="text" class="stage-name" data-stage="${index}" value="${esc(stage.name || "")}" placeholder="阶段名" style="width:130px">
+      <select class="stage-mode" data-stage="${index}">
+        ${Object.keys(MODE_LABEL).map(m => `<option value="${esc(m)}" ${m === stage.mode ? "selected" : ""}>${esc(MODE_LABEL[m])}</option>`).join("")}
+      </select>
+      <span class="spacer"></span>
+      <button class="mini" data-up="${index}" ${index === 0 ? "disabled" : ""}>↑</button>
+      <button class="mini" data-down="${index}" ${index === total - 1 ? "disabled" : ""}>↓</button>
+      <button class="mini" data-rm="${index}">删除</button>
+    </div>
+    <div class="accs">
+      ${!modelCatalog ? '<div class="empty">正在读取模型目录…</div>'
+        : (avail.length ? avail.map(a => {
+        const checked = named.has(a.name);
+        const other = usedElsewhere.has(a.name);
+        const w = stage.weights && stage.weights[a.name] != null ? stage.weights[a.name] : 1;
+        return `<label title="${esc(a.name)}">
+          <input type="checkbox" data-stage-acc="${index}" data-acc="${esc(a.name)}" ${checked ? "checked" : ""} ${other ? "disabled" : ""}>
+          <span class="name">${esc(shortName(a.name))}</span>
+          ${other ? '<span class="chip">已在其他阶段</span>' : ""}
+          ${stage.mode === "weighted-round-robin" && checked ? `<span class="w">权重 <input type="number" min="0" max="1000000" step="1" data-stage-w="${index}" data-acc="${esc(a.name)}" value="${esc(w)}"></span>` : ""}
+        </label>`;
+      }).join("") : '<div class="empty">没有账号的模型目录包含该模型</div>')}
+    </div>
+    ${index === 0 ? '<div class="stage-note">第一阶段的 <code>first</code> 会一直用同一个账号，直到 CPA 把它从候选里剔除（冷却/额度/禁用）。</div>' : ""}
+    ${index === total - 1 ? '<div class="stage-note">最后一个阶段通常用 <code>weighted-round-robin</code> 做池内分摊。</div>' : ""}
+  </div>`;
+}
+
+function bindStageEvents(rule){
+  const box = $("editorBody");
+
+  box.querySelectorAll("input.stage-name").forEach(el => {
+    el.addEventListener("input", () => {
+      const i = +el.getAttribute("data-stage");
+      rule.stages[i].name = el.value;
       markDirty();
     });
   });
-  tbody.querySelectorAll("button[data-del]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      delete rules[btn.getAttribute("data-del")];
-      markDirty(); renderRules();
+
+  box.querySelectorAll("select.stage-mode").forEach(el => {
+    el.addEventListener("change", () => {
+      const i = +el.getAttribute("data-stage");
+      rule.stages[i].mode = el.value;
+      // first 不接受权重，切换时清掉，避免保存被插件拒绝。
+      if (el.value === "first") rule.stages[i].weights = {};
+      markDirty(); renderEditor();
     });
   });
-  fillPreviewModels();
+
+  box.querySelectorAll("input[data-stage-acc]").forEach(el => {
+    el.addEventListener("change", () => {
+      const i = +el.getAttribute("data-stage-acc");
+      const acc = el.getAttribute("data-acc");
+      const stage = rule.stages[i];
+      stage.accounts = stage.accounts || [];
+      if (el.checked) {
+        if (!stage.accounts.includes(acc)) stage.accounts.push(acc);
+      } else {
+        stage.accounts = stage.accounts.filter(x => x !== acc);
+        if (stage.weights) delete stage.weights[acc];
+      }
+      markDirty(); renderEditor(); renderRuleList();
+    });
+  });
+
+  box.querySelectorAll("input[data-stage-w]").forEach(el => {
+    el.addEventListener("change", () => {
+      const i = +el.getAttribute("data-stage-w");
+      const acc = el.getAttribute("data-acc");
+      const stage = rule.stages[i];
+      const v = parseInt(el.value, 10);
+      stage.weights = stage.weights || {};
+      // 清空或非数字视为默认权重 1，直接删掉键即可。
+      if (!isFinite(v) || v < 0) { delete stage.weights[acc]; el.value = 1; return; }
+      stage.weights[acc] = v;
+      markDirty();
+    });
+  });
+
+  box.querySelectorAll("button[data-rm]").forEach(el => {
+    el.addEventListener("click", () => {
+      rule.stages.splice(+el.getAttribute("data-rm"), 1);
+      markDirty(); renderEditor(); renderRuleList();
+    });
+  });
+  box.querySelectorAll("button[data-up]").forEach(el => {
+    el.addEventListener("click", () => {
+      const i = +el.getAttribute("data-up");
+      if (i <= 0) return;
+      const [s] = rule.stages.splice(i, 1);
+      rule.stages.splice(i - 1, 0, s);
+      markDirty(); renderEditor(); renderRuleList();
+    });
+  });
+  box.querySelectorAll("button[data-down]").forEach(el => {
+    el.addEventListener("click", () => {
+      const i = +el.getAttribute("data-down");
+      if (i >= rule.stages.length - 1) return;
+      const [s] = rule.stages.splice(i, 1);
+      rule.stages.splice(i + 1, 0, s);
+      markDirty(); renderEditor(); renderRuleList();
+    });
+  });
 }
 
-function fillPreviewModels(){
-  const sel = $("pvModel");
-  const keep = sel.value;
-  const models = Object.keys(rules).sort();
-  sel.innerHTML = models.length
-    ? models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join("")
-    : '<option value="">（先添加一条规则）</option>';
-  if (keep && models.indexOf(keep) >= 0) sel.value = keep;
+// 该模型可用的账号：以 CPA 注册的模型目录为准。
+function availableFor(model){
+  if (!model || !modelCatalog) return [];
+  return accounts.filter(a => supportsModel(a, model));
 }
 
-/* ---- 保存规则 ---- */
+function autoLadder(model){
+  const avail = availableFor(model).filter(usable);
+  const pool = avail.length ? avail : availableFor(model);
+  if (!pool.length) { toast("err", "没有账号的模型目录包含该模型"); return null; }
+  // 默认阶梯：第一个号单独负责到底，其余进池分摊。这是「烧干 A 再进池」
+  // 最常见的形状，用户再按需要加中间层。
+  const stages = [{ name: "primary", mode: "first", accounts: [pool[0].name], weights: {} }];
+  if (pool.length > 1) {
+    stages.push({ name: "pool", mode: "weighted-round-robin", accounts: pool.slice(1).map(a => a.name), weights: {} });
+  }
+  return stages;
+}
+
+/* ---- 保存 ---- */
+function rulePayload(rule){
+  const entry = { strategy: rule.strategy };
+  // 多选的别名随规则一起提交：插件会把它们展开成共享同一套阶梯的条目。
+  if (rule.sharedWith && rule.sharedWith.length) entry.models = rule.sharedWith.slice();
+  if (rule.strategy === "staged") {
+    entry.stages = (rule.stages || []).map(s => {
+      const out = { name: s.name || "", mode: s.mode };
+      if (s.accounts && s.accounts.length) out.accounts = s.accounts.slice();
+      if (s.mode !== "first" && s.weights && Object.keys(s.weights).length) out.weights = s.weights;
+      return out;
+    });
+    if (rule.unlisted === "include") entry.unlisted = "include";
+  } else {
+    if (rule.provider_group_by) entry["provider-group-by"] = rule.provider_group_by;
+    if (rule.provider_weights && Object.keys(rule.provider_weights).length) {
+      entry["provider-weights"] = rule.provider_weights;
+    }
+  }
+  return entry;
+}
+
 async function saveRules(){
   const payload = {};
   Object.keys(rules).sort().forEach(model => {
     const rule = rules[model] || {};
     if (!rule.strategy) return;
-    const entry = { strategy: rule.strategy };
-    if (rule.provider_group_by) entry["provider-group-by"] = rule.provider_group_by;
-    if (rule.provider_weights && Object.keys(rule.provider_weights).length) {
-      entry["provider-weights"] = rule.provider_weights;
-    }
-    payload[model] = entry;
+    payload[model] = rulePayload(rule);
   });
   await call(PLUGIN_CONFIG_PATH, {
     method: "PATCH",
@@ -530,13 +953,12 @@ async function saveRules(){
   savedRules = JSON.parse(JSON.stringify(rules));
   markClean(Object.keys(payload).length > 0);
   toast("ok", "已保存 " + Object.keys(payload).length + " 条规则");
-  // 配置变更会让宿主重新 configure 插件,重新拉一次确认线上状态。
   loadStatus().catch(() => {});
 }
 
 /* ---- 试算 ---- */
-function candidatePayload(){
-  return accounts.filter(a => selected.has(a.name)).map(a => ({
+function candidatePayload(model){
+  return accounts.filter(a => picked.has(a.name) && supportsModel(a, model)).map(a => ({
     ID: a.name,
     Provider: a.provider,
     Priority: a.priority || 0,
@@ -545,23 +967,48 @@ function candidatePayload(){
   }));
 }
 
+// busy 给按钮一个转圈态,并在结束时保证按钮一定复位——否则一次失败的请求
+// 会让按钮永远转下去,看起来像页面卡死。
+async function busy(button, fn){
+  if (!button) return fn();
+  button.classList.add("busy");
+  button.disabled = true;
+  try {
+    return await fn();
+  } finally {
+    button.classList.remove("busy");
+    button.disabled = false;
+  }
+}
+
 async function runPreview(){
   const model = $("pvModel").value;
-  if (!model) { toast("err", "先添加一条规则并选择模型"); return; }
-  const cands = candidatePayload();
-  if (!cands.length) { toast("err", "先在左侧勾选至少一个账号"); return; }
+  if (!model || model === "__custom__") { toast("err", "先在下拉里选一个模型"); return; }
+  const cands = candidatePayload(model);
+  if (!cands.length) { toast("err", "左侧没有勾选支持该模型的账号"); return; }
   const body = {
     model: model,
     strategy: $("pvStrategy").value,
     iterations: parseInt($("pvIter").value, 10) || 8,
     candidates: cands
   };
-  const data = await call(PLUGIN_API + "/preview", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
-  renderPreview(data);
+  const box = $("pvSteps");
+  // 用占位替换旧结果:留着上一次的 chip 会让人以为那就是这一次的结论。
+  box.className = "";
+  box.innerHTML = Array.from({ length: Math.min(body.iterations, 12) },
+    () => '<span class="skeleton"></span>').join("") + '<div style="clear:both"></div>';
+  try {
+    const data = await call(PLUGIN_API + "/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    renderPreview(data);
+  } catch (err) {
+    box.className = "empty";
+    box.textContent = "试算失败：" + (err.message || err);
+    throw err;
+  }
 }
 
 function renderPreview(data){
@@ -569,25 +1016,29 @@ function renderPreview(data){
   const box = $("pvSteps");
   if (!steps.length) { box.className = "empty"; box.textContent = "没有结果。"; return; }
   box.className = "";
-  box.innerHTML = steps.map(s => {
-    if (s.auth_id) return `<span class="stage-step">#${s.index + 1} <b>${esc(shortName(s.auth_id))}</b></span>`;
-    if (s.delegate_builtin) return `<span class="stage-step">#${s.index + 1} 委托内置 <b>${esc(s.delegate_builtin)}</b></span>`;
-    return `<span class="stage-step miss">#${s.index + 1} 不接管（交回 CPA）</span>`;
-  }).join("");
+  box.innerHTML = steps.map((s, i) => {
+    // --i 让每个 chip 依次入场,顺序本身就是「第几发打给谁」的信息。
+    const style = ` style="--i:${i}"`;
+    if (s.auth_id) return `<span class="stage-step"${style}>#${s.index + 1} <b>${esc(shortName(s.auth_id))}</b></span>`;
+    if (s.delegate_builtin) return `<span class="stage-step"${style}>#${s.index + 1} 委托内置 <b>${esc(s.delegate_builtin)}</b></span>`;
+    return `<span class="stage-step miss"${style}>#${s.index + 1} 不接管（交回 CPA）</span>`;
+  }).join("") + '<div style="clear:both"></div>';
 
   const counts = (data && data.counts) || {};
   const keys = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
-  const rows = keys.map(k => `<tr><td><div class="name">${esc(k)}</div></td><td>${counts[k]}</td></tr>`).join("");
-  let html = `<table class="grid"><thead><tr><th>账号</th><th>占比</th></tr></thead><tbody>${rows ||
-    '<tr><td colspan="2" class="empty">本次没有选中任何账号</td></tr>'}</tbody></table>`;
-
+  const rows = keys.map(k => `<tr><td><span class="name">${esc(k)}</span></td><td>${counts[k]}</td></tr>`).join("");
   const facts = [];
   facts.push(`模型 <code>${esc(data.model)}</code>`);
   facts.push(`策略 <code>${esc(data.strategy || "-")}</code>`);
   if (!data.configured) facts.push('<span class="chip none">该模型还没有规则</span>');
   if (data.delegated) facts.push(`委托内置 <code>${esc(data.delegated)}</code>`);
   if (data.handled === 0) facts.push('<span class="chip none">全部未接管</span>');
-  $("pvSummary").innerHTML = html + `<div class="note" style="background:transparent;border:0;padding:8px 0">${facts.join(" · ")}</div>`;
+  $("pvSummary").innerHTML =
+    `<table class="grid" style="width:100%;border-collapse:collapse;font-size:12px">
+       <thead><tr><th style="text-align:left">账号</th><th style="text-align:left">占比</th></tr></thead>
+       <tbody>${rows || '<tr><td colspan="2" class="empty">本次没有选中任何账号</td></tr>'}</tbody>
+     </table>
+     <div class="ver" style="padding:8px 0">${facts.join(" · ")}</div>`;
 }
 
 // 账号名是形如 codex-a3c633e0-wangzhixing567@gmail.com-pro.json 的长串,
@@ -606,40 +1057,100 @@ async function boot(){
   $("btnPreview").disabled = true;
   try {
     await loadAccounts();
+    await loadAliases();
+    allModelIds = [];
+    fillModelOptions();
     await loadStatus();
+    // 模型目录决定「该模型可用账号」，但它是逐凭据查询，所以放到最后并且
+    // 允许失败——加载不到时界面仍然可用，只是“支持”标记与可用账号提示缺席。
+    loadModelCatalog().then(() => {
+      renderAccounts(); renderEditor(); renderRuleList();
+    }).catch(err => toast("err", "模型目录读取失败: " + err.message));
     $("btnPreview").disabled = false;
   } catch (err) {
     toast("err", err.message || String(err));
   }
 }
 
+/* ---- 事件 ---- */
 $("accFilter").addEventListener("input", renderAccounts);
 $("accProvider").addEventListener("change", renderAccounts);
 $("accOnlyUsable").addEventListener("change", renderAccounts);
-$("accAll").addEventListener("change", () => {
-  const rows = visibleAccounts();
-  if ($("accAll").checked) rows.forEach(a => selected.add(a.name));
-  else rows.forEach(a => selected.delete(a.name));
-  renderAccounts();
-});
-$("btnAccReload").addEventListener("click", () => loadAccounts().catch(e => toast("err", e.message)));
+$("accOnlyModel").addEventListener("change", renderAccounts);
+$("btnAccReload").addEventListener("click", () => busy($("btnAccReload"), () => {
+  return loadAccounts()
+    .then(() => { modelCatalog = null; return loadModelCatalog(); })
+    .then(() => { renderAccounts(); renderEditor(); })
+    .catch(e => toast("err", e.message));
+}));
+
 $("btnAddRule").addEventListener("click", () => {
-  const model = $("newModel").value.trim();
-  if (!model) { toast("err", "请输入模型 ID"); return; }
-  if (rules[model]) { toast("err", "该模型已有规则"); return; }
-  rules[model] = { strategy: strategies[0] || "fill-first", provider_group_by: "", provider_weights: {} };
-  $("newModel").value = "";
-  markDirty(); renderRules();
+  // 多选：第一个选中项作为规则名（阶梯挂在它名下），其余作为别名共享同一套阶梯。
+  const chosen = Array.from($("newModel").selectedOptions).map(o => o.value).filter(v => v && v !== "__custom__");
+  let model = chosen[0];
+  if (!model || model === "__custom__") model = $("newModelCustom").value.trim();
+  if (!model) { toast("err", "请输入或选择一个模型 ID"); return; }
+  if (rules[model]) { toast("err", "该模型已有规则"); editing = model; renderRuleList(); renderEditor(); return; }
+
+  const aliases = chosen.slice(1).filter(a => a !== model);
+  // 别名不能是已有规则，否则会被插件判为歧义配置而整份拒绝。
+  const clash = aliases.filter(a => rules[a]);
+  if (clash.length) {
+    toast("err", "这些模型已有自己的规则，不能作为别名：" + clash.join("、"));
+    return;
+  }
+
+  const ladder = autoLadder(model);
+  rules[model] = ladder
+    ? { strategy: "staged", stages: ladder, unlisted: "exclude", provider_group_by: "", provider_weights: {}, sharedWith: aliases }
+    : { strategy: strategies[0] || "fill-first", stages: [], unlisted: "exclude", provider_group_by: "", provider_weights: {}, sharedWith: aliases };
+  // 新规则的可用账号直接勾进试算池，省掉一次手工勾选。
+  availableFor(model).filter(usable).forEach(a => picked.add(a.name));
+  editing = model;
+  markDirty(); renderRuleList(); renderEditor(); renderAccounts();
   $("pvModel").value = model;
+  if (aliases.length) toast("ok", "这条规则同时覆盖 " + aliases.length + " 个别名");
 });
-$("newModel").addEventListener("keydown", e => { if (e.key === "Enter") $("btnAddRule").click(); });
-$("btnSaveRules").addEventListener("click", () => saveRules().catch(e => toast("err", e.message)));
+
+$("editStrategy").addEventListener("change", () => {
+  if (!editing || !rules[editing]) return;
+  const rule = rules[editing];
+  rule.strategy = $("editStrategy").value;
+  if (rule.strategy === "staged" && (!rule.stages || !rule.stages.length)) {
+    const ladder = autoLadder(editing);
+    if (ladder) rule.stages = ladder;
+  }
+  markDirty(); renderEditor(); renderRuleList();
+});
+$("btnStageAdd").addEventListener("click", () => {
+  if (!editing || !rules[editing]) { toast("err", "先选一条规则"); return; }
+  const rule = rules[editing];
+  rule.stages = rule.stages || [];
+  rule.stages.push({ name: "stage-" + (rule.stages.length + 1), mode: "weighted-round-robin", accounts: [], weights: {} });
+  markDirty(); renderEditor(); renderRuleList();
+});
+$("btnAutoLadder").addEventListener("click", () => {
+  if (!editing || !rules[editing]) { toast("err", "先选一条规则"); return; }
+  const ladder = autoLadder(editing);
+  if (!ladder) return;
+  rules[editing].strategy = "staged";
+  rules[editing].stages = ladder;
+  markDirty(); renderEditor(); renderRuleList();
+});
+$("editUnlisted").addEventListener("change", () => {
+  if (!editing || !rules[editing]) return;
+  rules[editing].unlisted = $("editUnlisted").checked ? "include" : "exclude";
+  markDirty();
+});
+$("btnSaveRules").addEventListener("click", () => busy($("btnSaveRules"), () =>
+  saveRules().catch(e => toast("err", e.message))));
 $("btnRevertRules").addEventListener("click", () => {
   rules = JSON.parse(JSON.stringify(savedRules));
-  renderRules(); markClean(Object.keys(rules).length > 0);
+  if (editing && !rules[editing]) editing = null;
+  renderRuleList(); renderEditor(); markClean(Object.keys(rules).length > 0);
 });
-$("btnPreview").addEventListener("click", () => runPreview().catch(e => toast("err", e.message)));
-$("btnUseConfig").addEventListener("click", () => boot().catch(e => toast("err", e.message)));
+$("btnPreview").addEventListener("click", () => busy($("btnPreview"), () =>
+  runPreview().catch(e => toast("err", e.message))));
 
 window.__ssThemeSync && window.__ssThemeSync();
 if (getKey()) boot(); else showAuth();

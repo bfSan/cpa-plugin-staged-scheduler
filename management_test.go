@@ -40,8 +40,13 @@ func TestAdvertisedStrategiesAreAcceptedByReconfigure(t *testing.T) {
 	}
 	for _, strategy := range supportedStrategies {
 		plugin := newSchedulerPlugin()
-		config := []byte("rules:\n  model-a:\n    strategy: " + strategy + "\n")
-		if err := plugin.Reconfigure(config); err != nil {
+		config := "rules:\n  model-a:\n    strategy: " + strategy + "\n"
+		if strategy == strategyStaged {
+			// `staged` is only meaningful with a ladder; supplying one is what
+			// makes this strategy's minimal valid rule.
+			config += "    stages:\n      - name: primary\n        mode: first\n        accounts: [auth-1]\n"
+		}
+		if err := plugin.Reconfigure([]byte(config)); err != nil {
 			t.Fatalf("advertised strategy %q rejected by Reconfigure: %v", strategy, err)
 		}
 	}
