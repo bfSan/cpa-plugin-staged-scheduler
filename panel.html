@@ -706,7 +706,7 @@ function renderModelPicker(){
         const items = groups.get(ch);
         return `<div class="picker-group">
           <h4>${esc(ch)} <span class="chip">${items.length}</span></h4>
-          <div class="chips">${items.map(m => modelChip(m)).join("")}</div>
+          <div class="chips">${items.map(m => modelChip(m, ch)).join("")}</div>
         </div>`;
       }).join("");
   }
@@ -721,13 +721,26 @@ function renderModelPicker(){
   renderModelSummary();
 }
 
-function modelChip(m){
+// group 是这条 chip 落在哪一组，用来判断上游名标注能不能显示。
+//
+// 上游名是**某个渠道自己的叫法**，所以它只在"唯一渠道服务该模型"时才有意义。
+// 多渠道组里各渠道的名字根本不同：deepseek-v4.1-flash 在 qoder 叫 dfmodel，
+// 在 trae 就叫它自己。此时挑一个来显示等于替其他渠道说话，标注必须是错的，
+// 因此不显示。（下游可见 ID 不能省，它就是规则 key，也是要选的东西。）
+function modelChip(m, group){
   const isRule = !!rules[m.id];
   const isSel = selectedModels.includes(m.id);
   const cls = isRule ? "mchip owned" : (isSel ? "mchip on" : "mchip");
-  const up = m.upstream ? `<span class="sub">← ${esc(m.upstream)}</span>` : "";
+  const single = group && group !== "多渠道" && group !== "未归属";
+  const upstream = single ? (m.upstream || "") : "";
+  const up = upstream ? `<span class="sub">← ${esc(upstream)}</span>` : "";
   const tag = isRule ? '<span class="sub">已有规则</span>' : "";
-  return `<div class="${cls}" data-model="${esc(m.id)}" title="${esc(m.id)}${m.upstream ? " ← " + esc(m.upstream) : ""}">${esc(m.id)} ${up}${tag}</div>`;
+  // 多渠道时改在悬停里列出服务它的渠道，那才是这个分组真正能提供的信息。
+  const provs = single ? [] : providersForModel(m.id);
+  const title = upstream ? `${m.id} ← ${upstream}`
+    : provs.length > 1 ? `${m.id}（${provs.join(" + ")} 都能服务）`
+    : m.id;
+  return `<div class="${cls}" data-model="${esc(m.id)}" title="${esc(title)}">${esc(m.id)} ${up}${tag}</div>`;
 }
 
 function toggleModel(id){
