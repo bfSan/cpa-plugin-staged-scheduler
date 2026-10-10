@@ -178,15 +178,54 @@ rules:
 	}
 }
 
-// "Unlisted: include" is how the operator says "after my named accounts, spill
-// into everything else" without having to enumerate the remainder.
-func TestStagedUnlistedIncludeSpillsIntoTheFinalStage(t *testing.T) {
+// The fallback pool is a stage, not a mode. Naming the remaining accounts in the
+// final stage is how "burn A, then spread across everything else" is expressed,
+// and it is the better spelling: the pool is visible in the ladder and can carry
+// weights, neither of which a flag that appended unlisted candidates could do.
+func TestStagedFallbackPoolIsAFinalStage(t *testing.T) {
 	plugin := newSchedulerPlugin()
 	if err := plugin.Reconfigure([]byte(`
 rules:
   gpt-6.1-sol:
     strategy: staged
-    unlisted: include
+    stages:
+      - name: primary
+        mode: first
+        accounts: [A]
+      - name: pool
+        mode: weighted-round-robin
+        accounts: [C, D]
+`)); err != nil {
+		t.Fatalf("Reconfigure() error = %v", err)
+	}
+
+	// A is spent, so the ladder falls through to the pool and rotates there.
+	seen := map[string]int{}
+	for i := 0; i < 4; i++ {
+		got := plugin.Pick(pluginapi.SchedulerPickRequest{
+			Model: "gpt-6.1-sol",
+			Candidates: []pluginapi.SchedulerAuthCandidate{
+				codexCandidate("C"), codexCandidate("D"),
+			},
+		})
+		if !got.Handled || got.AuthID == "" {
+			t.Fatalf("pick %d = %+v, want the fallback pool to serve", i, got)
+		}
+		seen[got.AuthID]++
+	}
+	if seen["C"] != 2 || seen["D"] != 2 {
+		t.Errorf("pool split = %v, want C and D to rotate evenly", seen)
+	}
+}
+
+// A credential in no stage is never picked, even when the ladder is otherwise
+// spent, because the account list is the whole pool.
+func TestStagedAccountOutsideEveryStageIsNeverPicked(t *testing.T) {
+	plugin := newSchedulerPlugin()
+	if err := plugin.Reconfigure([]byte(`
+rules:
+  gpt-6.1-sol:
+    strategy: staged
     stages:
       - name: primary
         mode: first
@@ -195,16 +234,17 @@ rules:
 		t.Fatalf("Reconfigure() error = %v", err)
 	}
 
-	// A is gone; only unlisted credentials remain.
 	got := plugin.Pick(pluginapi.SchedulerPickRequest{
-		Model:      "gpt-6.1-sol",
-		Candidates: []pluginapi.SchedulerAuthCandidate{codexCandidate("C"), codexCandidate("D")},
+		Model: "gpt-6.1-sol",
+		Candidates: []pluginapi.SchedulerAuthCandidate{
+			codexCandidate("C"), codexCandidate("D"),
+		},
 	})
-	if !got.Handled {
-		t.Fatalf("pick = %+v, want the unlisted credential to be picked", got)
+	if got.AuthID != "" {
+		t.Fatalf("pick = %+v, want no credential outside the stages", got)
 	}
-	if got.AuthID != "C" {
-		t.Fatalf("pick = %+v, want the first unlisted credential in sorted order", got)
+	if !got.Reject {
+		t.Fatalf("pick = %+v, want a refusal since strict is the default", got)
 	}
 }
 
@@ -389,6 +429,22 @@ func TestStagedRejectsInvalidLadders(t *testing.T) {
     stages:
       - name: primary
         mode: first
+`,
+		},
+		{
+			// The fallback pool belongs in the ladder's final stage. A mode that
+			// appended every unlisted candidate would make the account list stop
+			// describing the whole pool, so it is not accepted at all -- including
+			// the name it used to have, which must not read as a valid choice.
+			name: "removed include mode",
+			config: `rules:
+  model-a:
+    strategy: staged
+    unlisted: include
+    stages:
+      - name: primary
+        mode: first
+        accounts: [A]
 `,
 		},
 		{

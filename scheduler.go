@@ -61,16 +61,17 @@ type ruleConfig struct {
 	Models []string `yaml:"models"`
 	// Stages is the staged strategy's account ladder.
 	Stages []stageConfig `yaml:"stages"`
-	// Unlisted decides what a staged ladder does with a candidate no stage names,
-	// and what happens when the ladder has nothing left to offer:
+	// Unlisted decides what a staged ladder does when it can produce no account at
+	// all, because every account it names is unavailable:
 	//
-	//   strict  (default) only the listed accounts are ever used; if none is
-	//                     available the pick is rejected rather than handed back,
-	//                     so the ladder is a whitelist
-	//   exclude           only the listed accounts are chosen, but a spent ladder
-	//                     hands back to the host's built-in selector, which may
-	//                     then pick an unlisted credential
-	//   include           unlisted credentials are appended to the final stage
+	//   strict  (default) refuse the pick, so nothing outside the ladder is ever
+	//                     used and the ladder is a whitelist
+	//   exclude           hand back to the host's built-in selector, which may
+	//                     then pick a credential no stage named
+	//
+	// To spread load across every account after burning the first ones, name them
+	// in the final stage; that fallback stays visible in the ladder and can carry
+	// weights, which a mode that appended unlisted candidates could not.
 	Unlisted string `yaml:"unlisted"`
 	// sharedFrom records the rule this entry was expanded from, when this model
 	// was listed under another rule's `models`. It is never configured and never
@@ -130,7 +131,7 @@ func (p *schedulerPlugin) Reconfigure(raw []byte) error {
 		switch rule.Unlisted {
 		case "", unlistedStrict:
 			rule.Unlisted = unlistedStrict
-		case unlistedExclude, unlistedInclude:
+		case unlistedExclude:
 		default:
 			return fmt.Errorf("model %q has unsupported unlisted mode %q", normalizedModel, rule.Unlisted)
 		}
@@ -226,21 +227,29 @@ func expandSharedModels(rules map[string]ruleConfig) error {
 	return nil
 }
 
-// The unlisted modes decide what happens to a candidate no stage names.
+// unlisted decides one thing only: what happens when a ladder can produce no
+// account at all, because every account it names is unavailable. It is the last
+// resort, not a way to widen the ladder.
 //
-// strict is the default, and the reason it exists: an operator who lists accounts
-// is describing the whole pool they want used. "exclude" alone could not hold
-// that line, because handing back to the host let the built-in selector pick a
-// credential the operator never named -- and with session affinity on, from every
-// priority tier rather than just the top one. strict refuses instead, so a ladder
-// is a whitelist and nothing outside it is ever used.
+//	strict (default) refuse the pick, so nothing outside the ladder is ever used
+//	exclude          hand back to the host's built-in selector
 //
-// include appends unlisted credentials to the final stage, which is what "burn A,
-// then spread across everything else" means.
+// strict is the default because "exclude" alone could not hold a whitelist: a
+// hand-back is not a neutral no-op. The built-in selector then chooses from the
+// same candidate pool, so it can route to exactly the credential the operator
+// never named -- and with session affinity on, from every priority tier rather
+// than just the top one.
+//
+// There is deliberately no third mode here. "Spill into everything else" is
+// already expressible by naming the remaining accounts in the final stage, and
+// that is the better spelling: the fallback pool stays visible in the ladder
+// instead of being implied by a flag, and it can be weighted like any other
+// stage. A mode that silently appends every unlisted candidate would also make
+// the account list stop describing the whole pool, which is exactly the
+// ambiguity this setting exists to remove.
 const (
 	unlistedStrict  = "strict"
 	unlistedExclude = "exclude"
-	unlistedInclude = "include"
 )
 
 // normalizeStages validates and canonicalizes a staged ladder. Every stage has to
@@ -439,11 +448,8 @@ func (p *schedulerPlugin) pickStagedLocked(
 	}
 
 	stages := rule.Stages
-	includeUnlisted := unlistedMode(rule) == unlistedInclude
-	for index, stage := range stages {
-		// Only the final stage absorbs unlisted credentials: that is what
-		// "burn A, then B, then spill into everything else" means.
-		pool := stagePool(stage, available, includeUnlisted && index == len(stages)-1)
+	for _, stage := range stages {
+		pool := stagePool(stage, available)
 		if len(pool) == 0 {
 			continue
 		}
@@ -459,33 +465,17 @@ func (p *schedulerPlugin) pickStagedLocked(
 
 // stagePool returns the candidates of a stage that are actually available,
 // ordered by the stage's account list so "first" means the operator's first.
-// includeUnlisted appends the credentials no stage named, sorted by ID so the
-// resulting order is stable across calls.
+// Every credential a ladder may use is named by one of its stages, so there is
+// nothing to append here: the account list is the whole pool.
 func stagePool(
 	stage stageConfig,
 	available map[string]pluginapi.SchedulerAuthCandidate,
-	includeUnlisted bool,
 ) []pluginapi.SchedulerAuthCandidate {
 	pool := make([]pluginapi.SchedulerAuthCandidate, 0, len(stage.Accounts))
-	named := make(map[string]bool, len(stage.Accounts))
 	for _, account := range stage.Accounts {
-		named[account] = true
 		if candidate, ok := available[account]; ok {
 			pool = append(pool, candidate)
 		}
-	}
-	if !includeUnlisted {
-		return pool
-	}
-	rest := make([]string, 0, len(available))
-	for id := range available {
-		if !named[id] {
-			rest = append(rest, id)
-		}
-	}
-	sort.Strings(rest)
-	for _, id := range rest {
-		pool = append(pool, available[id])
 	}
 	return pool
 }

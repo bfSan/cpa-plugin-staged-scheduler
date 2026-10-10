@@ -297,11 +297,10 @@ pre.dump{background:var(--code-bg);color:var(--code-fg);border-radius:8px;paddin
         <button class="mini" id="btnAutoLadder" title="按该模型可用账号自动生成一条阶梯">自动编排</button>
       </div>
       <div class="bar" id="unlistedBar" style="display:none">
-        <label class="chk" style="gap:6px">没列进阶梯的账号
-          <select id="editUnlisted" style="min-width:280px">
-            <option value="strict">完全不使用；阶梯全不可用时直接报错（默认）</option>
-            <option value="exclude">完全不使用；但阶梯全不可用时交回 CPA 兜底</option>
-            <option value="include">当作兜底池，追加到最后一个阶段轮转</option>
+        <label class="chk" style="gap:6px">阶梯里的账号都不可用时
+          <select id="editUnlisted" style="min-width:300px">
+            <option value="strict">直接报错，不使用没列出的账号（默认）</option>
+            <option value="exclude">交回 CPA 兜底，可能用到没列出的账号</option>
           </select>
         </label>
       </div>
@@ -449,13 +448,16 @@ const MODE_LABEL = {
   "first": "first（固定当前账号，烧干才换）",
   "weighted-round-robin": "weighted-round-robin（组内按权重轮转）"
 };
-// 这三种模式的差别只在「阶梯里没有一个账号可用」时才体现。交回 CPA 和直接报错的
-// 区别很隐蔽：交回之后 CPA 内置调度可能在同一个候选池里挑走一个你没列过的账号，
-// 那样阶梯就只是偏好而不是边界。所以把后果写在界面上。
+// 这两种模式的差别只在「阶梯里一个账号都不剩」时才体现，而那时用户多半看不到
+// 报错来自插件。交回 CPA 和直接报错的区别也很隐蔽：交回之后 CPA 内置调度可能在
+// 同一个候选池里挑走一个你没列过的账号，那样阶梯就只是偏好而不是边界。所以把后果
+// 写在界面上。
+//
+// 兜底池不在这里：要「先烧 A，再让其余所有号分摊」，就把它们写进最后一个阶段。
+// 那样兜底池在阶梯里看得见，还能配权重——而一个自动追加未列出账号的模式做不到。
 const UNLISTED_NOTE = {
-  strict: '<b>只使用上面列出的账号。</b>阶梯里一个都不剩时（都被冷却/额度/禁用，或宿主根本没把它们放进候选），请求会直接失败——不会退回内置调度，因此绝不会用到没列出的账号。',
-  exclude: '只使用上面列出的账号；但阶梯里一个都不剩时，会<b>交回 CPA 内置调度兜底</b>——那时可能用到你没列出的账号。本部署还开着 session-affinity，兜底范围是所有优先级的账号。',
-  include: '<b>未列出的账号会被追加到最后一个阶段</b>一起轮转，等于把阶梯最后一层当作全池兜底。适合「先烧 A，再让所有号分摊」。'
+  strict: '<b>只使用上面列出的账号。</b>阶梯里一个都不剩时（都被冷却/额度/禁用，或宿主根本没把它们放进候选），请求会直接失败——不会退回内置调度，所以绝不会用到没列出的账号。<br>想让其余账号兜底，就把它们加进最后一个阶段。',
+  exclude: '只使用上面列出的账号；但阶梯里一个都不剩时，会<b>交回 CPA 内置调度兜底</b>——那时可能用到你没列出的账号。注意兜底的挑选范围由 CPA 的内置策略与 <code>routing</code> 配置决定（例如开着 session-affinity 时会跨优先级挑），不是由本插件控制。'
 };
 
 function markDirty(){

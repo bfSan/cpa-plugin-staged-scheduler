@@ -55,11 +55,11 @@ Provider IDs and their weight keys are trimmed and normalized to lowercase. Base
 
 Rule matching is exact after trimming surrounding whitespace. Add another model by adding another entry under `rules`; no plugin rebuild is required.
 
-### What a ladder does with accounts it does not name
+### When the ladder runs dry
 
-`unlisted` is the difference between "a ladder is a preference" and "a ladder is a
-whitelist", so it covers both halves of that question: which candidates the ladder may
-*pick*, and what happens when it can pick none of them.
+`unlisted` answers one question: the ladder named some accounts and not one of them is
+available, so what happens? It is the difference between "a ladder is a preference" and "a
+ladder is a whitelist".
 
 ```yaml
 rules:
@@ -75,11 +75,13 @@ rules:
         accounts: [C, D, E]
 ```
 
-| `unlisted` | Which accounts are picked | When the ladder can pick none |
-| --- | --- | --- |
-| `strict` (default) | only those a stage names | refuse the pick |
-| `exclude` | only those a stage names | hand back to the host's built-in selector |
-| `include` | named accounts, then every other candidate appended to the final stage | n/a: the final stage always has the rest |
+| `unlisted` | When none of the named accounts is available |
+| --- | --- |
+| `strict` (default) | refuse the pick |
+| `exclude` | hand back to the host's built-in selector |
+
+Either way only the accounts a stage names are ever *picked*. That is not the setting's
+job: it comes from the ladder being the pool. `unlisted` decides the last resort only.
 
 `strict` exists because `exclude` alone did not hold the line. Handing back is not a
 neutral no-op: the built-in selector then chooses from the same candidate pool, so it may
@@ -102,6 +104,28 @@ refuse, so a ladder listing credentials that are largely `disabled` will fail re
 that `exclude` would have served from elsewhere. Check the account statuses in the panel's
 left column before choosing `strict`, and prefer `exclude` where a fallback matters more
 than the boundary.
+
+### An invalid rule disables the whole plugin
+
+A rejected value is not scoped to the model it was written on. The host accepts the PATCH
+and writes it to `config.yaml` first; the plugin then validates during reconfiguration and
+refuses to register at all. The visible result is that the plugin's routes disappear and
+its `status` endpoint starts returning 404:
+
+```
+PATCH /v0/management/plugins/staged-scheduler/config   -> {"status":"ok"}
+GET   /v0/management/plugins                           -> registered: false
+                                                          effective_enabled: false
+```
+
+Traffic does not stop, which is what makes this easy to miss: every model the plugin had a
+rule for silently falls back to whatever scheduler is next in line. Because the invalid
+value stays in `config.yaml`, the plugin stays unregistered across restarts until it is
+removed or corrected — so the fix is to PATCH a valid rule back (`{"rules":{}}` clears it),
+not to restart.
+
+The panel therefore only offers values the plugin accepts. Anything typed by hand into
+`config.yaml` can still hit this, and `make verify` covers the rejection paths.
 
 ## Commands
 
