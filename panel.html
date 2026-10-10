@@ -504,7 +504,8 @@ async function loadModelCatalog(){
     try {
       const d = await call(MODELS_PATH + "?name=" + encodeURIComponent(a.name));
       const ids = ((d && d.models) || []).map(m => m.id).filter(Boolean);
-      map.set(a.name, new Set(ids));
+      // 统一小写存放，与宿主的 EqualFold 语义对齐；比对时也走 normModel。
+      map.set(a.name, new Set(ids.map(normModel)));
     } catch (_) {
       map.set(a.name, new Set());
     }
@@ -512,25 +513,32 @@ async function loadModelCatalog(){
   modelCatalog = map;
 }
 
-// 凭据的模型目录里存的是上游真实模型名，而规则 key 是下游可见的那个字符串
-// （如 workbuddy-deep ← deep-model）。判断“某个账号能不能服务这个模型”必须
-// 用上游名去比对，否则会得出“0 个账号支持该模型”的假象。
+// 凭据目录里的名字就是客户端可见名 —— 别名已经在服务端套好了。
 //
-// 只认别名表给出的映射：早期版本还会猜“去掉第一个连字符前缀”，实测对现有
-// 47 个下游模型没有一次改变归属，却可能把不相关的账号算成支持，所以不做猜测。
-function upstreamNames(model){
-  if (!model) return [];
-  const names = [model];
-  const a = aliasIndex[model];
-  if (a && a.upstream && a.upstream !== model) names.push(a.upstream);
-  return names;
+// 这一点值得写下来，因为按直觉会反着想：以为目录存的是上游真名，于是拿别名表
+// 反解出上游名再去比对。实测两者都不成立。qoder 的目录里有别名
+// deepseek-v4.1-flash，却没有它的上游真名 dfmodel；workbuddy 的目录里有别名
+// workbuddy-deepseek-v4.1-flash，同样没有裸的 deepseek-v4.1-flash。所以目录
+// 直查就是最终答案。
+//
+// 反解上游名还会造成跨渠道串味，因为别名只在自己的渠道内生效，而反解得到的名字
+// 是全局的：workbuddy-deepseek-v4.1-flash 的上游名恰好是 deepseek-v4.1-flash，
+// 而 qoder 和 trae 的目录里也有同名的东西（那是它们自己的别名或裸名，跟
+// workbuddy 这条毫无关系）。于是这个模型被算成三个渠道共同服务，实际只有
+// workbuddy 能服务它 —— 正是"名字相似就合并"的误判。实测在 57 个下游模型上，
+// 反解一共制造 4 个这种假多渠道路径，而直接查目录不会漏掉任何一个。
+//
+// 既然宿主判定"某账号能否服务某模型"用的是 strings.EqualFold（完整、大小写
+// 不敏感，既无前缀匹配也无模糊匹配），这里的比对也照此办理。
+function normModel(id){
+  return String(id == null ? "" : id).trim().toLowerCase();
 }
 
 function supportsModel(a, model){
   if (!model || !modelCatalog) return true;
   const set = modelCatalog.get(a.name);
   if (!set) return true;
-  return upstreamNames(model).some(n => set.has(n));
+  return set.has(normModel(model));
 }
 
 function fillProviders(){
@@ -640,11 +648,11 @@ async function loadDownstreamModels(){
 // 只标注别名表里的渠道，加载完会重算并重绘。
 function providersForModel(model){
   if (!modelCatalog) return [];
-  const names = upstreamNames(model);
+  const key = normModel(model);
   const set = new Set();
   accounts.forEach(a => {
     const cat = modelCatalog.get(a.name);
-    if (cat && names.some(n => cat.has(n))) set.add(a.provider || "其他");
+    if (cat && cat.has(key)) set.add(a.provider || "其他");
   });
   return Array.from(set).sort();
 }
