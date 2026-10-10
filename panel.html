@@ -97,6 +97,9 @@ ul.pool li.picked{background:var(--acc-ring);border-radius:6px}
 ul.pool .who{min-width:0;flex:1 1 auto}
 ul.pool .who .name{font-size:12px;overflow-wrap:anywhere}
 ul.pool .meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:2px}
+/* 配置里记的是文件名，所以主名用邮箱、文件名仍照出一行小的：
+   两个都看得见，才既认得人又对得上规则。 */
+ul.pool .who .file{display:block;font-size:11px;color:var(--mut);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere;margin-top:1px}
 /* 规则列表 */
 ul.rules{margin:0;padding:0;list-style:none}
 ul.rules li{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px dashed var(--border);
@@ -252,7 +255,7 @@ pre.dump{background:var(--code-bg);color:var(--code-fg);border-radius:8px;paddin
     <h2>账号池 <span class="hint">规则里写的就是这里的 name</span>
       <span class="spacer"></span><span class="chip" id="accCnt"></span></h2>
     <div class="bar">
-      <input type="search" class="grow" id="accFilter" placeholder="筛选账号 / 邮箱">
+      <input type="search" class="grow" id="accFilter" placeholder="筛选：邮箱 / 名字 / 文件名">
       <select id="accProvider"><option value="">全部 provider</option></select>
       <label class="chk"><input type="checkbox" id="accOnlyUsable">只看可用</label>
       <label class="chk"><input type="checkbox" id="accOnlyModel">只看支持所选模型</label>
@@ -453,6 +456,7 @@ const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&a
 
 /* ---- 状态 ---- */
 let accounts = [];            // CPA 凭据（含可用性）
+let accNames = new Map();     // 文件名 -> 可读名（邮箱优先），仅用于显示
 let modelCatalog = null;      // Map<凭据name, Set<上游模型id>>，仅用于判断“哪个账号能服务该模型”
 let downstream = [];          // [{id, channel, upstream}] 下游最终可见的模型
 let aliasIndex = {};          // 下游模型 id -> [{channel, upstream}]（仅用于展示来源，按渠道取）
@@ -520,6 +524,7 @@ async function loadAccounts(){
     unavailable: !!f.unavailable
   })).filter(a => a.name);
   accounts.sort((a, b) => (a.provider + a.name).localeCompare(b.provider + b.name));
+  accNames = buildAccNames();
   fillProviders();
   renderAccounts();
 }
@@ -610,8 +615,9 @@ function renderAccounts(){
       return `<li class="${cls}">
         <input type="checkbox" data-pick="${esc(a.name)}" ${picked.has(a.name) ? "checked" : ""}>
         <span class="who">
-          <span class="name">${esc(a.name)}</span>
+          <span class="name">${esc(accPrimary(a))}</span>
           <span class="meta">${statusChip}<span class="ver">${esc(a.provider || "-")}</span>${support}</span>
+          <span class="file" title="规则里记录的就是这个名字：${esc(a.name)}">${esc(a.name)}</span>
         </span>
       </li>`;
     }).join("");
@@ -1109,7 +1115,8 @@ function stageCard(stage, index, total){
         const w = stage.weights && stage.weights[a.name] != null ? stage.weights[a.name] : 1;
         return `<label title="${esc(a.name)}">
           <input type="checkbox" data-stage-acc="${index}" data-acc="${esc(a.name)}" ${checked ? "checked" : ""} ${other ? "disabled" : ""}>
-          <span class="name">${esc(shortName(a.name))}</span>
+          <span class="name">${esc(accLabel(a.name))}</span>
+          <span class="ver">${esc(a.provider || "-")}</span>
           ${other ? '<span class="chip">已在其他阶段</span>' : ""}
           ${stage.mode === "weighted-round-robin" && checked ? `<span class="w">权重 <input type="number" min="0" max="1000000" step="1" data-stage-w="${index}" data-acc="${esc(a.name)}" value="${esc(w)}"></span>` : ""}
         </label>`;
@@ -1233,11 +1240,6 @@ function canShareWith(model, others){
   return false;
 }
 
-// 短名：账号文件名的可读缩写，只用于界面显示。
-function accLabel(name){
-  return shortName(String(name));
-}
-
 function autoLadder(model){
   const avail = availableFor(model).filter(usable);
   const pool = avail.length ? avail : availableFor(model);
@@ -1355,7 +1357,7 @@ function renderPreview(data){
   box.innerHTML = steps.map((s, i) => {
     // --i 让每个 chip 依次入场,顺序本身就是「第几发打给谁」的信息。
     const style = ` style="--i:${i}"`;
-    if (s.auth_id) return `<span class="stage-step"${style}>#${s.index + 1} <b>${esc(shortName(s.auth_id))}</b></span>`;
+    if (s.auth_id) return `<span class="stage-step"${style} title="${esc(s.auth_id)}">#${s.index + 1} <b>${esc(accLabel(s.auth_id))}</b></span>`;
     if (s.delegate_builtin) return `<span class="stage-step"${style}>#${s.index + 1} 委托内置 <b>${esc(s.delegate_builtin)}</b></span>`;
     // 严格模式拒绝这一发时，说清是「拒绝」而不是「交回」。两者在这个位置长得
     // 一样（都没有 auth_id），但后果完全相反：拒绝会失败，交回会用别的账号。
@@ -1380,6 +1382,33 @@ function renderPreview(data){
      <div class="ver" style="padding:8px 0">${facts.join(" · ")}</div>`;
 }
 
+// 账号的可读名。文件名是机器 ID（qoder-cn-01a0bcb2-3d0c-7bbe-bc6a-374ac91eefbf.json），
+// 在列表里既占地方又认不出是谁，所以优先用邮箱；某些渠道不给邮箱只给 label
+// （trae 的"用户5574335983"），退回 label；再退回文件名。
+//
+// ★ 这只影响**显示**：规则里 stage.accounts 存的、日志里打的、宿主认识的，
+//   始终是文件名。两者不能混 —— 变了 key 就等于把已有规则写坏。
+function accPrimary(a){
+  return a.email || a.label || shortName(a.name);
+}
+
+// 同一渠道内可读名可能撞车（同一邮箱下的 pro / prolite 两份凭据）。撞车时补一段
+// 文件名后缀区分，否则列表里会出现两行一模一样、其实是不同凭据的账号，选哪个都
+// 是赌。不同渠道之间不算撞车：那两行会各自带 provider 标。
+function buildAccNames(){
+  const count = new Map();
+  accounts.forEach(a => {
+    const k = (a.provider || "") + "\u0000" + accPrimary(a);
+    count.set(k, (count.get(k) || 0) + 1);
+  });
+  const out = new Map();
+  accounts.forEach(a => {
+    const k = (a.provider || "") + "\u0000" + accPrimary(a);
+    out.set(a.name, count.get(k) > 1 ? accPrimary(a) + " · " + shortName(a.name) : accPrimary(a));
+  });
+  return out;
+}
+
 // 账号名是形如 codex-a3c633e0-wangzhixing567@gmail.com-pro.json 的长串,
 // 列表里只保留能区分彼此的部分。
 function shortName(name){
@@ -1387,6 +1416,11 @@ function shortName(name){
   const parts = base.split("-");
   if (parts.length >= 3 && parts[0] === "codex") return parts.slice(2).join("-") || base;
   return base;
+}
+
+function accLabel(name){
+  const n = String(name);
+  return accNames.get(n) || shortName(n);
 }
 
 /* ---- 启动 ---- */
