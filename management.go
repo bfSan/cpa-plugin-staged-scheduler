@@ -11,9 +11,11 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
@@ -89,6 +91,7 @@ func managementRegistration() managementRegistrationResponse {
 		Routes: []managementRoute{
 			{Method: http.MethodGet, Path: base + "/status", Description: "Currently configured model rules and the strategies this build accepts."},
 			{Method: http.MethodPost, Path: base + "/preview", Description: "Replay one model rule against a candidate set and report which credential each pick would select, without advancing live cursors."},
+			{Method: http.MethodGet, Path: base + "/sessions", Description: "Report the live session-affinity bindings (session, model, stage, account). Read-only, for diagnosing why a session is or is not sticking."},
 		},
 		Resources: []resourceRoute{
 			{Path: "/panel", Menu: "Staged Scheduler", Description: "Inspect the credential pool, edit per-model scheduler rules, and replay a rule to see which account each request would pick."},
@@ -117,6 +120,8 @@ func handleManagement(raw []byte) ([]byte, error) {
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, statusPayload()))
 	case req.Method == http.MethodPost && path == base+"/preview":
 		return handlePreview(req.Body)
+	case req.Method == http.MethodGet && path == base+"/sessions":
+		return okEnvelope(mgmtJSONResponse(http.StatusOK, sessionsPayload()))
 	default:
 		return okEnvelope(mgmtJSONResponse(http.StatusNotFound, map[string]any{
 			"error": "not_found",
@@ -136,15 +141,21 @@ func renderPanel() string {
 func statusPayload() map[string]any {
 	// One snapshot serves both fields; taking two would let a concurrent
 	// reconfigure make "configured" disagree with the rules it accompanies.
-	rules := activeScheduler.snapshots()
-	return map[string]any{
+	rules, session := activeScheduler.snapshotWithSession()
+	payload := map[string]any{
 		"plugin_id":  pluginID,
 		"name":       pluginMetadataName,
 		"version":    pluginVersion,
 		"strategies": append([]string(nil), supportedStrategies...),
 		"rules":      rules,
 		"configured": len(rules) > 0,
+		// Reported so the panel can show the switch and the operator can tell
+		// whether stickiness is actually on for the models this plugin handles.
+		"session_affinity":        session.Enabled,
+		"session_affinity_ttl":    session.TTL,
+		"session_affinity_stages": session.Stages,
 	}
+	return payload
 }
 
 // previewRequest describes a candidate rule to replay. Passing candidates in the
@@ -266,5 +277,40 @@ func mgmtHTMLResponse(html string) pluginapi.ManagementResponse {
 			"Expires":       []string{"0"},
 		},
 		Body: []byte(html),
+	}
+}
+
+// sessionsPayload reports the live session bindings.
+//
+// Bindings are otherwise invisible: when a session stops sticking the operator
+// can see the symptom (accounts rotating) but not the cause (no binding, an
+// expired one, or a stage that is not in the allow-list). This route makes the
+// difference observable without reading plugin memory.
+func sessionsPayload() map[string]any {
+	activeScheduler.mu.Lock()
+	defer activeScheduler.mu.Unlock()
+
+	ttl := activeScheduler.session.ttl
+	now := time.Now()
+	rows := make([]map[string]any, 0, len(activeScheduler.sessionBindings))
+	for key, binding := range activeScheduler.sessionBindings {
+		rows = append(rows, map[string]any{
+			"session":     key,
+			"model":       binding.model,
+			"stage":       binding.stage,
+			"auth_id":     binding.authID,
+			"age_seconds": int(now.Sub(binding.touched).Seconds()),
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i]["session"].(string) < rows[j]["session"].(string)
+	})
+
+	return map[string]any{
+		"session_affinity":        activeScheduler.session.enabled,
+		"session_affinity_ttl":    ttl.String(),
+		"session_affinity_stages": sortedKeys(activeScheduler.session.stages),
+		"bindings":                len(rows),
+		"sessions":                rows,
 	}
 }

@@ -305,6 +305,17 @@ pre.dump{background:var(--code-bg);color:var(--code-fg);border-radius:8px;paddin
       </div>
     </section>
 
+    <section class="card" id="sessionCard">
+      <h2>会话粘性 <span class="hint">同一个会话尽量固定用同一个账号</span>
+        <span class="spacer"></span><span class="chip" id="sessionState"></span></h2>
+      <div class="bar">
+        <label class="chk"><input type="checkbox" id="sessOn"> 启用</label>
+        <label class="chk">有效期 <input type="text" id="sessTTL" placeholder="1h" style="width:90px"></label>
+        <label class="chk">只对这些阶段生效 <input type="text" id="sessStages" placeholder="留空=全部加权阶段" style="width:220px"></label>
+      </div>
+      <div class="note" id="sessNote"></div>
+    </section>
+
     <section class="card" id="editorCard">
       <h2>规则详情 <span class="hint" id="editHint">从上面选一条规则</span>
         <span class="spacer"></span><span class="chip" id="editAvail"></span>
@@ -461,6 +472,7 @@ let downstream = [];          // [{id, channel, upstream}] 下游最终可见的
 let aliasIndex = {};          // 下游模型 id -> [{channel, upstream}]（仅用于展示来源，按渠道取）
 let selectedModels = [];      // 模型选择器里勾选的模型 id（顺序即规则名优先序）
 let rules = {};               // model -> rule 配置（本地编辑态）
+let sessionCfg = { affinity: false, ttl: "1h", stages: [] };  // 会话粘性开关
 let savedRules = {};          // 保存成功的快照，用于 dirty
 let strategies = [];          // 插件支持的策略
 let editing = null;           // 当前编辑的模型
@@ -907,6 +919,12 @@ async function loadStatus(){
   savedRules = JSON.parse(JSON.stringify(rules));
   $("ver").textContent = data && data.version ? ("v" + data.version) : "";
   $("stratHint").textContent = strategies.length ? ("本 build 支持: " + strategies.join(" / ")) : "";
+  sessionCfg = {
+    affinity: !!(data && data.session_affinity),
+    ttl: (data && data.session_affinity_ttl) || "1h",
+    stages: (data && data.session_affinity_stages) || []
+  };
+  renderSession();
   fillStrategySelects();
   renderRuleList();
   markClean(!!(data && data.configured));
@@ -921,6 +939,40 @@ function fillStrategySelects(){
   $("pvStrategy").innerHTML = '<option value="">（用规则里的策略）</option>' +
     strategies.map(s => `<option value="${esc(s)}">${label(s)}</option>`).join("");
   $("pvStrategy").value = pvKeep;
+}
+
+// renderSession 把开关状态写回控件，并说清"关掉会怎样"。
+//
+// 关掉之后并不是"没有粘性"这么简单：宿主自己的会话粘性在插件接管选号后就不再
+// 运行了，所以关掉意味着同一个会话会按阶梯轮转、每轮可能换账号。这句话必须写在
+// 界面上，否则关掉的人会以为回到了"宿主默认"，而实际是"完全没有粘性"。
+function renderSession(){
+  const on = $("sessOn");
+  if (on) on.checked = !!sessionCfg.affinity;
+  const ttl = $("sessTTL");
+  if (ttl && document.activeElement !== ttl) ttl.value = sessionCfg.ttl || "";
+  const st = $("sessStages");
+  if (st && document.activeElement !== st) st.value = (sessionCfg.stages || []).join(", ");
+  const chip = $("sessionState");
+  if (chip) {
+    chip.textContent = sessionCfg.affinity ? "已启用" : "未启用";
+    chip.className = "chip" + (sessionCfg.affinity ? " hit" : " none");
+  }
+  const note = $("sessNote");
+  if (note) {
+    note.innerHTML = sessionCfg.affinity
+      ? '同一会话在<b>加权轮转</b>阶段内固定用同一个账号；该账号不可用（冷却/额度/被移出候选）时自动换绑。'
+        + '<code>first</code> 阶段本来就会一直用同一个号，不受这里影响。'
+        + '没带会话标识的请求（如没有 <code>X-Session-Id</code>）仍按阶梯轮转。'
+      : '<b>未启用</b>时：插件接管选号后，宿主自带的会话粘性不再生效，'
+        + '同一个会话会按阶梯轮转、每次可能换账号。想让会话固定用同一个号，就打开上面的开关。';
+  }
+}
+
+function readSessionFromUI(){
+  sessionCfg.affinity = !!$("sessOn").checked;
+  sessionCfg.ttl = ($("sessTTL").value || "1h").trim();
+  sessionCfg.stages = ($("sessStages").value || "").split(",").map(x => x.trim()).filter(Boolean);
 }
 
 function renderRuleList(){
@@ -1311,7 +1363,12 @@ async function saveRules(){
   await call(PLUGIN_CONFIG_PATH, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rules: payload })
+    body: JSON.stringify({
+      rules: payload,
+      session_affinity: sessionCfg.affinity,
+      session_affinity_ttl: sessionCfg.ttl,
+      session_affinity_stages: sessionCfg.stages
+    })
   });
   savedRules = JSON.parse(JSON.stringify(rules));
   markClean(Object.keys(payload).length > 0);
@@ -1646,6 +1703,16 @@ $("editUnlisted").addEventListener("change", () => {
   $("unlistedNote").innerHTML = UNLISTED_NOTE[rules[editing].unlisted] || "";
   markDirty();
 });
+["sessOn", "sessTTL", "sessStages"].forEach(id => {
+  const el = $(id);
+  if (!el) return;
+  el.addEventListener(el.type === "checkbox" ? "change" : "input", () => {
+    readSessionFromUI();
+    renderSession();
+    markDirty();
+  });
+});
+
 $("btnSaveRules").addEventListener("click", () => busy($("btnSaveRules"), () =>
   saveRules().catch(e => toast("err", e.message))));
 $("btnRevertRules").addEventListener("click", () => {

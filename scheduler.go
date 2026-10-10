@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 	"gopkg.in/yaml.v3"
@@ -80,8 +81,85 @@ type ruleConfig struct {
 	sharedFrom string `yaml:"-"`
 }
 
+// pluginConfig mirrors the shape CPA uses for its own routing switches: a plain
+// bool to turn the feature on, a duration string for the binding lifetime, and a
+// pointer bool for the sub-behaviour so "unset" stays distinguishable from an
+// explicit false.
 type pluginConfig struct {
 	Rules map[string]ruleConfig `yaml:"rules"`
+
+	// SessionAffinity pins a session to one account inside a weighted stage.
+	// Off by default: the host's own session-affinity does not run once this
+	// plugin answers, so before this existed a staged rule rotated every turn.
+	// Turning it on restores stickiness for the models this plugin handles.
+	SessionAffinity bool `yaml:"session_affinity"`
+
+	// SessionAffinityTTL is how long a binding survives without being used.
+	// Defaults to 1h, matching the host's own default. Accepts Go durations
+	// such as "30m" or "2h30m".
+	SessionAffinityTTL string `yaml:"session_affinity_ttl"`
+
+	// SessionAffinityStages limits stickiness to the listed stage names. Empty
+	// means every weighted stage. "first" stages are never pinned regardless,
+	// because their contract is to burn the head of the list until the host
+	// stops offering it.
+	SessionAffinityStages []string `yaml:"session_affinity_stages"`
+}
+
+// sessionPolicy is the normalized, validated form of the session switches. It is
+// derived once per Reconfigure so the hot path does no parsing.
+type sessionPolicy struct {
+	enabled bool
+	ttl     time.Duration
+	stages  map[string]bool // nil means "every weighted stage"
+}
+
+// defaultSessionTTL matches the host's own session-affinity default.
+const defaultSessionTTL = time.Hour
+
+// normalizeSessionPolicy validates the session switches. An unparsable or
+// non-positive TTL is rejected rather than silently ignored: the operator asked
+// for a lifetime and getting a different one without being told is worse than a
+// startup error they can see.
+func normalizeSessionPolicy(cfg pluginConfig) (sessionPolicy, error) {
+	policy := sessionPolicy{enabled: cfg.SessionAffinity, ttl: defaultSessionTTL}
+
+	if raw := strings.TrimSpace(cfg.SessionAffinityTTL); raw != "" {
+		parsed, errParse := time.ParseDuration(raw)
+		if errParse != nil {
+			return sessionPolicy{}, fmt.Errorf("session_affinity_ttl %q is not a duration: %w", raw, errParse)
+		}
+		if parsed <= 0 {
+			return sessionPolicy{}, fmt.Errorf("session_affinity_ttl %q must be positive", raw)
+		}
+		if parsed < time.Second {
+			parsed = time.Second
+		}
+		policy.ttl = parsed
+	}
+
+	if len(cfg.SessionAffinityStages) > 0 {
+		policy.stages = make(map[string]bool, len(cfg.SessionAffinityStages))
+		for _, raw := range cfg.SessionAffinityStages {
+			name := strings.TrimSpace(raw)
+			if name == "" {
+				return sessionPolicy{}, fmt.Errorf("session_affinity_stages has an empty entry")
+			}
+			policy.stages[name] = true
+		}
+	}
+	return policy, nil
+}
+
+// pinsStage reports whether this stage may hold a session binding.
+func (s sessionPolicy) pinsStage(stage stageConfig) bool {
+	if !s.enabled || stage.Mode != stageModeWeightedRoundRobin {
+		return false
+	}
+	if s.stages == nil {
+		return true
+	}
+	return s.stages[stage.Name]
 }
 
 type schedulerPlugin struct {
@@ -89,12 +167,18 @@ type schedulerPlugin struct {
 	config            pluginConfig
 	groupCurrent      map[string]map[string]int64
 	credentialCursors map[string]map[string]int
+	// sessionBindings pins a session to an account within a weighted stage.
+	// See session_affinity.go for why the plugin has to do this itself.
+	sessionBindings map[string]sessionBinding
+	// session is the validated session-affinity switches.
+	session sessionPolicy
 }
 
 func newSchedulerPlugin() *schedulerPlugin {
 	return &schedulerPlugin{
 		groupCurrent:      make(map[string]map[string]int64),
 		credentialCursors: make(map[string]map[string]int),
+		sessionBindings:   make(map[string]sessionBinding),
 	}
 }
 
@@ -170,10 +254,19 @@ func (p *schedulerPlugin) Reconfigure(raw []byte) error {
 		return err
 	}
 
+	policy, errPolicy := normalizeSessionPolicy(decoded)
+	if errPolicy != nil {
+		return errPolicy
+	}
+
 	p.mu.Lock()
 	p.config = config
+	p.session = policy
 	p.groupCurrent = make(map[string]map[string]int64)
 	p.credentialCursors = make(map[string]map[string]int)
+	// Bindings describe choices made under the previous rule set; a reconfigure
+	// may have renamed or removed the stage they refer to, so start clean.
+	p.sessionBindings = make(map[string]sessionBinding)
 	p.mu.Unlock()
 	return nil
 }
@@ -359,6 +452,10 @@ func normalizeStage(
 
 func (p *schedulerPlugin) Pick(request pluginapi.SchedulerPickRequest) pluginapi.SchedulerPickResponse {
 	model := strings.TrimSpace(request.Model)
+	// The host hands schedulers the request headers, which is the only place a
+	// session identity is available here (the body is not passed). Empty means
+	// the client sent no session header: the stage then rotates as before.
+	session := sessionKey(request.Options.Headers)
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -377,7 +474,7 @@ func (p *schedulerPlugin) Pick(request pluginapi.SchedulerPickRequest) pluginapi
 	case strategyProviderWeightedRoundRobin:
 		return p.pickProviderWeightedLocked(model, rule, request.Candidates)
 	case strategyStaged:
-		return p.pickStagedLocked(model, rule, request.Candidates)
+		return p.pickStagedLocked(model, rule, request.Candidates, session)
 	default:
 		return pluginapi.SchedulerPickResponse{Handled: false}
 	}
@@ -432,6 +529,7 @@ func (p *schedulerPlugin) pickStagedLocked(
 	model string,
 	rule ruleConfig,
 	candidates []pluginapi.SchedulerAuthCandidate,
+	session string,
 ) pluginapi.SchedulerPickResponse {
 	available := make(map[string]pluginapi.SchedulerAuthCandidate, len(candidates))
 	for _, candidate := range candidates {
@@ -453,7 +551,7 @@ func (p *schedulerPlugin) pickStagedLocked(
 		if len(pool) == 0 {
 			continue
 		}
-		selected := p.selectFromStage(model, stage, pool)
+		selected := p.selectFromStage(model, stage, pool, session)
 		if selected == "" {
 			continue
 		}
@@ -486,9 +584,21 @@ func (p *schedulerPlugin) selectFromStage(
 	model string,
 	stage stageConfig,
 	pool []pluginapi.SchedulerAuthCandidate,
+	session string,
 ) string {
 	if stage.Mode == stageModeFirst {
 		return pool[0].ID
+	}
+
+	// Session stickiness applies only where the operator enabled it, and only to
+	// weighted stages. See session_affinity.go. It is checked before the rotation
+	// advances, so a bound session neither consumes a turn nor moves the cursor
+	// for everyone else.
+	pinned := p.session.pinsStage(stage)
+	if pinned {
+		if bound := p.boundAuth(session, model, stage.Name, pool, p.session.ttl); bound != "" {
+			return bound
+		}
 	}
 
 	// Cursors are keyed per model and stage so two models sharing an account
@@ -502,6 +612,9 @@ func (p *schedulerPlugin) selectFromStage(
 		cursor := cursors[stage.Name]
 		selected := pool[cursor%len(pool)]
 		cursors[stage.Name] = cursor + 1
+		if pinned {
+			p.bindSession(session, model, stage.Name, selected.ID, p.session.ttl)
+		}
 		return selected.ID
 	}
 
@@ -545,6 +658,9 @@ func (p *schedulerPlugin) selectFromStage(
 		return ""
 	}
 	current[weightPrefix+selected] -= totalWeight
+	if pinned {
+		p.bindSession(session, model, stage.Name, selected, p.session.ttl)
+	}
 	return selected
 }
 
@@ -721,10 +837,45 @@ type ruleSnapshot struct {
 // stable order to render. Aliases expanded from a models list are reported with
 // their owner in SharedWith, which is what lets the panel show one editable row
 // per ladder instead of one row per alias.
+// sessionSnapshot is the read-only view of the session switches that the status
+// route reports. Stages is nil when stickiness applies to every weighted stage.
+type sessionSnapshot struct {
+	Enabled bool
+	TTL     string
+	Stages  []string
+}
+
+// snapshotWithSession returns the rules and the session switches from a single
+// lock acquisition, so the two cannot disagree in one response.
+func (p *schedulerPlugin) snapshotWithSession() ([]ruleSnapshot, sessionSnapshot) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.snapshotsLocked(), sessionSnapshot{
+		Enabled: p.session.enabled,
+		TTL:     p.session.ttl.String(),
+		Stages:  sortedKeys(p.session.stages),
+	}
+}
+
+func sortedKeys(set map[string]bool) []string {
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for key := range set {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (p *schedulerPlugin) snapshots() []ruleSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.snapshotsLocked()
+}
 
+func (p *schedulerPlugin) snapshotsLocked() []ruleSnapshot {
 	// Group the expanded aliases by the rule they came from first, so each row
 	// can carry its complete set without a second pass over the rules.
 	shared := make(map[string][]string)
