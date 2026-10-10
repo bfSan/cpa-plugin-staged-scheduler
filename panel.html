@@ -93,7 +93,6 @@ ul.pool{margin:0;padding:0;list-style:none}
 ul.pool li{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border);min-width:0}
 ul.pool li:last-child{border-bottom:0}
 ul.pool li.off{color:var(--mut)}
-ul.pool li.picked{background:var(--acc-ring);border-radius:6px}
 ul.pool .who{min-width:0;flex:1 1 auto}
 ul.pool .who .name{font-size:12px;overflow-wrap:anywhere}
 ul.pool .meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:2px}
@@ -267,7 +266,7 @@ pre.dump{background:var(--code-bg);color:var(--code-fg);border-radius:8px;paddin
     <div class="note" id="accNote">
       数据来自 CPA 的 <code>/v0/management/auth-files</code> 与
       <code>/v0/management/auth-files/models</code>,都是只读的本地查询,不会访问上游、不消耗额度。
-      「支持所选模型」是按 CPA 已注册的模型目录判断的。
+      「支持所选模型」是按 CPA 已注册的模型目录判断的。<b>这里是只读参考</b>，试算的候选由规则自己决定，不从这里挑。
     </div>
   </section>
 
@@ -346,7 +345,7 @@ pre.dump{background:var(--code-bg);color:var(--code-fg);border-radius:8px;paddin
         <div id="pvSummary" style="margin-top:10px"></div>
       </div>
       <div class="note">
-        试算的候选来自左侧账号池里「该模型可用」的账号(勾选项)，在插件的独立副本上运行。
+        候选跟着规则走：阶梯类策略(<code>staged</code> / <code>provider-weighted-round-robin</code>)用<b>规则里列出的账号</b>；<code>fill-first</code> / <code>round-robin</code> 由 CPA 内置选择，用<b>该模型全部可用账号</b>。都在插件的独立副本上重放，不碰线上游标。
       </div>
     </section>
   </div>
@@ -465,7 +464,6 @@ let rules = {};               // model -> rule 配置（本地编辑态）
 let savedRules = {};          // 保存成功的快照，用于 dirty
 let strategies = [];          // 插件支持的策略
 let editing = null;           // 当前编辑的模型
-let picked = new Set();       // 试算/编排使用的账号
 let dirty = false;
 
 const STRATEGY_LABEL = {
@@ -611,9 +609,10 @@ function renderAccounts(){
         : a.status === "error" ? '<span class="chip err">error</span>'
         : a.status === "active" ? '<span class="chip hit">active</span>'
         : `<span class="chip">${esc(a.status || "-")}</span>`;
-      const cls = [usable(a) ? "" : "off", picked.has(a.name) ? "picked" : ""].filter(Boolean).join(" ");
+      // 这里不再有勾选框：试算的候选由规则自己决定（见 previewCandidateIds），
+      // 勾选不影响任何结果，留着就是"看着能选、其实没用"的死控件。
+      const cls = usable(a) ? "" : "off";
       return `<li class="${cls}">
-        <input type="checkbox" data-pick="${esc(a.name)}" ${picked.has(a.name) ? "checked" : ""}>
         <span class="who">
           <span class="name">${esc(accPrimary(a))}</span>
           <span class="meta">${statusChip}<span class="ver">${esc(a.provider || "-")}</span>${support}</span>
@@ -622,22 +621,24 @@ function renderAccounts(){
       </li>`;
     }).join("");
   }
-  box.querySelectorAll("input[data-pick]").forEach(cb => {
-    cb.addEventListener("change", () => {
-      const name = cb.getAttribute("data-pick");
-      if (cb.checked) picked.add(name); else picked.delete(name);
-      renderAccounts(); renderPreviewChip();
-    });
-  });
   renderPreviewChip();
 }
 
-function renderPreviewChip(){ $("pvCand").textContent = previewPool().length + " 个候选"; }
+function renderPreviewChip(){
+  const model = $("pvModel").value;
+  const n = previewCandidateIds(model).length;
+  const rule = rules[model];
+  const own = rule && (rule.strategy === "staged" || rule.strategy === "provider-weighted-round-robin");
+  $("pvCand").textContent = n + " 个候选";
+  $("pvCand").title = own
+    ? "候选 = 这条规则自己列出的账号"
+    : "候选 = 该模型全部可用账号（这类策略由 CPA 内置选择，插件不挑账号）";
+}
 
-// 试算候选：勾选项中该模型可用的账号。模型不支持的直接排除，否则试算会
-// 显示一个线上永远不会发生的选择。
+// 试算候选：见 previewCandidateIds —— 规则自己决定范围，与左侧勾选无关。
 function previewPool(){
-  return accounts.filter(a => picked.has(a.name) && supportsModel(a, editing || $("pvModel").value));
+  const ids = new Set(previewCandidateIds($("pvModel").value));
+  return accounts.filter(a => ids.has(a.name));
 }
 
 /* ---- 下游模型列表 ---- */
@@ -721,7 +722,7 @@ function renderModelPicker(){
   const q = $("modelFilter").value.trim().toLowerCase();
   const onlyUnruled = $("modelOnlyUnruled").checked;
   const shown = downstream.filter(m => {
-    if (onlyUnruled && (rules[m.id] || selectedModels.includes(m.id))) return false;
+    if (onlyUnruled && (coveredBy(m.id) || selectedModels.includes(m.id))) return false;
     if (!q) return true;
     // 上游名也可搜：用户可能记得渠道自己的叫法。按渠道取（见 upstreamOf），
     // 免得搜到别的渠道的同名别名。
@@ -777,25 +778,43 @@ function upstreamOf(id, group){
   return hit ? (hit.upstream || "") : "";
 }
 
+// coveredBy 返回把某模型纳入规则的那条规则名（规则 key），没有则 null。
+//
+// 覆盖有两条途径：模型自己是一条规则（rules[id]），或者它被"加入"到别的规则下
+// 共用阶梯（出现在那条规则的 sharedWith 里）。只看 rules[id] 会漏掉后者 —— 表现
+// 就是 gpt-5.6-luna 标了"已有规则"，而与它共用同一套阶梯的 gpt-5.6-sol、
+// gpt-6-astra 等一并空白，让人以为它们没配规则、会走 CPA 内置调度。
+function coveredBy(id){
+  if (rules[id]) return id;
+  const owner = Object.keys(rules).find(k => (rules[k].sharedWith || []).includes(id));
+  return owner || null;
+}
+
 // group 是这条 chip 落在哪一组，用来判断上游名标注能不能显示。
 function modelChip(m, group){
-  const isRule = !!rules[m.id];
+  const owner = coveredBy(m.id);
+  const isRule = owner === m.id;                 // 自己就是规则名
+  const isShared = !!owner && !isRule;           // 挂在别的规则下共用阶梯
   const isSel = selectedModels.includes(m.id);
-  const cls = isRule ? "mchip owned" : (isSel ? "mchip on" : "mchip");
+  const cls = owner ? "mchip owned" : (isSel ? "mchip on" : "mchip");
   const upstream = upstreamOf(m.id, group);
   const up = upstream ? `<span class="sub">← ${esc(upstream)}</span>` : "";
-  const tag = isRule ? '<span class="sub">已有规则</span>' : "";
+  // 统一写「已有规则」：具体挂在谁下面，去规则详情里看（那里写了覆盖多少个模型）。
+  // 每行都挂"随 xxx"会让 chip 变长且互相挤，而它想表达的信息其实只有"已配过"。
+  const tag = owner ? '<span class="sub">已有规则</span>' : "";
   // 多渠道时改在悬停里列出服务它的渠道，那才是这个分组真正能提供的信息。
   const provs = (group === "多渠道" || group === "未归属") ? providersForModel(m.id) : [];
   const title = upstream ? `${m.id} ← ${upstream}`
+    : isShared ? `${m.id}（与「${owner}」共用同一套阶梯）`
     : provs.length > 1 ? `${m.id}（${provs.join(" + ")} 都能服务）`
     : m.id;
   return `<div class="${cls}" data-model="${esc(m.id)}" title="${esc(title)}">${esc(m.id)} ${up}${tag}</div>`;
 }
 
 function toggleModel(id){
-  // 已有规则的模型：点一下就是查看它（再点一次收起，见 renderRuleList）。
-  if (rules[id]) { editing = (editing === id) ? null : id; renderRuleList(); renderEditor(); renderAccounts(); return; }
+  // 已有规则的模型（含共用项）：点一下就是查看承载它的那条规则，再点一次收起。
+  const owner = coveredBy(id);
+  if (owner) { editing = (editing === owner) ? null : owner; renderRuleList(); renderEditor(); renderAccounts(); return; }
   const i = selectedModels.indexOf(id);
   if (i >= 0) selectedModels.splice(i, 1); else selectedModels.push(id);
   renderModelPicker();
@@ -842,7 +861,7 @@ function joinRejectReason(chosen, covered){
 // joinSelectedInto 把当前选中的模型挂到 owner 规则下。
 function joinSelectedInto(owner){
   if (!rules[owner]) { toast("err", "这条规则已不存在，请刷新"); return; }
-  const chosen = selectedModels.filter(m => !rules[m]);
+  const chosen = selectedModels.filter(m => !coveredBy(m));
   if (!chosen.length) { toast("err", "先在上面选中要加入的模型"); return; }
   const covered = [owner].concat(rules[owner].sharedWith || []);
   const already = chosen.filter(m => covered.includes(m));
@@ -913,7 +932,7 @@ function renderRuleList(){
   const box = $("ruleRows");
   // 有未配规则的模型被选中时，每条规则都长出「加入」按钮 —— 挂载动作就发生
   // 在规则上，不需要再去别处挑一次规则（那正是"两个规则列表"的由来）。
-  const joining = selectedModels.filter(m => !rules[m]);
+  const joining = selectedModels.filter(m => !coveredBy(m));
   $("ruleHint").textContent = joining.length
     ? ("已选 " + joining.length + " 个模型，点某条规则的「加入」即可挂上去")
     : "点一条查看/编辑，再点一次收起";
@@ -997,9 +1016,15 @@ function renderEditor(){
   // 所以真正有意义的数字是“共同可用账号”，而不是规则名自己的可用账号。
   const covered = [model].concat(rule.sharedWith || []);
   const common = commonAccounts(covered);
-  $("editAvail").textContent = !modelCatalog ? "模型目录未加载"
-    : covered.length === 1 ? (avail.length + " 个账号可服务该模型")
-    : (common ? (covered.length + " 个模型共同可用账号 " + common.size + " 个") : (covered.length + " 个模型 (无法判断共同账号)"));
+  // 先说"这条规则对几个模型生效"，再说账号。只看账号数会让人以为这条规则只管
+  // 当前这一个模型，而实际上它可能已经挂在好几个模型下面共用同一套阶梯。
+  const scopeText = covered.length === 1
+    ? "仅本模型 1 个"
+    : `共 ${covered.length} 个模型（本模型 + 共用 ${covered.length - 1} 个）`;
+  $("editAvail").textContent = !modelCatalog ? scopeText + " · 模型目录未加载"
+    : covered.length === 1 ? (scopeText + " · " + avail.length + " 个账号可服务")
+    : (common ? (scopeText + " · 共同可用账号 " + common.size + " 个")
+              : (scopeText + " · 无法判断共同账号"));
   $("unlistedBar").style.display = rule.strategy === "staged" ? "" : "none";
   if ($("editUnlisted").value !== rule.unlisted) $("editUnlisted").value = rule.unlisted;
   // 这三种模式的差别只在“阶梯全不可用”时体现，而那时用户多半看不到报错来自插件，
@@ -1061,7 +1086,7 @@ function aliasBarHtml(rule){
 
   return `<div class="stage" style="background:var(--card)">
     <div class="stage-head">
-      <b style="font-size:13px">这条规则覆盖哪些模型</b>
+      <b style="font-size:13px">这条规则对 ${covered.length} 个模型生效</b>
       <span class="ver">它们共用下面这一套账号阶梯</span>
     </div>
     <div style="margin:6px 0">${rows}</div>
@@ -1295,8 +1320,34 @@ async function saveRules(){
 }
 
 /* ---- 试算 ---- */
+// previewCandidateIds 决定试算拿哪些账号当候选。
+//
+// 关键是候选要跟规则自己的策略一致，否则试算结论没有意义：
+//   · fill-first / round-robin 是**委托 CPA 内置**的，插件不选账号，候选就得是
+//     该模型全部可用账号，否则重放出来的是"插件只拿到这几个"，线上不是这样。
+//   · staged / provider-weighted-round-robin 由插件在候选里挑，候选就是选择范围。
+//     这时必须用**规则自己列出的账号**：选了一条已有规则的模型，却要先去左侧
+//     账号池把同一批账号勾一遍，既多余又容易漏勾 —— 漏一个，试算就会跳过那个
+//     阶段（后端遇空池直接 continue），显示出线上不会发生的路径。
+function previewCandidateIds(model){
+  if (!model) return [];
+  const rule = rules[model];
+  const strategy = ($("pvStrategy").value || (rule && rule.strategy) || "").toLowerCase();
+  const ruleOwned = strategy === "staged" || strategy === "provider-weighted-round-robin";
+  if (rule && ruleOwned) {
+    // 规则里出现过的账号。共用模型不另存账号，走的是同一条阶梯，所以直接用它。
+    const set = new Set();
+    (rule.stages || []).forEach(s => (s.accounts || []).forEach(a => set.add(a)));
+    if (set.size) return Array.from(set);
+    // 规则还没配账号（比如新建的空规则）：退回全部可用账号，让试算至少能跑，
+    // 而不是给一个"0 个候选"的空结论。
+  }
+  return accounts.filter(a => supportsModel(a, model)).map(a => a.name);
+}
+
 function candidatePayload(model){
-  return accounts.filter(a => picked.has(a.name) && supportsModel(a, model)).map(a => ({
+  const ids = new Set(previewCandidateIds(model));
+  return accounts.filter(a => ids.has(a.name)).map(a => ({
     ID: a.name,
     Provider: a.provider,
     Priority: a.priority || 0,
@@ -1323,7 +1374,7 @@ async function runPreview(){
   const model = $("pvModel").value;
   if (!model) { toast("err", "先在上面的下拉里选一个模型"); return; }
   const cands = candidatePayload(model);
-  if (!cands.length) { toast("err", "左侧没有勾选支持该模型的账号"); return; }
+  if (!cands.length) { toast("err", "该模型没有可用账号，试算无从开始"); return; }
   const body = {
     model: model,
     strategy: $("pvStrategy").value,
@@ -1367,7 +1418,8 @@ function renderPreview(data){
 
   const counts = (data && data.counts) || {};
   const keys = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
-  const rows = keys.map(k => `<tr><td><span class="name">${esc(k)}</span></td><td>${counts[k]}</td></tr>`).join("");
+  // 主名用邮箱（与账号池、阶段选择器一致），文件名放 title 里，两者都可追溯。
+  const rows = keys.map(k => `<tr><td><span class="name" title="${esc(k)}">${esc(accLabel(k))}</span></td><td>${counts[k]}</td></tr>`).join("");
   const facts = [];
   facts.push(`模型 <code>${esc(data.model)}</code>`);
   facts.push(`策略 <code>${esc(data.strategy || "-")}</code>`);
@@ -1528,7 +1580,7 @@ $("btnAddRule").addEventListener("click", () => {
   if (rules[model]) { toast("err", "该模型已有规则；要让它和别的模型共用阶梯，请选中那些模型后点本规则的「加入」"); editing = model; renderRuleList(); renderEditor(); return; }
 
   const shared = chosen.slice(1).filter(a => a !== model);
-  const clash = shared.filter(a => rules[a]);
+  const clash = shared.filter(a => coveredBy(a));
   if (clash.length) {
     toast("err", "这些模型已有自己的规则，不能作为共用项：" + clash.join("、"));
     return;
@@ -1548,8 +1600,6 @@ $("btnAddRule").addEventListener("click", () => {
   rules[model] = ladder
     ? { strategy: "staged", stages: ladder, unlisted: "strict", provider_group_by: "", provider_weights: {}, sharedWith: shared }
     : { strategy: strategies[0] || "fill-first", stages: [], unlisted: "strict", provider_group_by: "", provider_weights: {}, sharedWith: shared };
-  // 新规则的可用账号直接勾进试算池，省掉一次手工勾选。
-  availableFor(model).filter(usable).forEach(a => picked.add(a.name));
   selectedModels = [];
   editing = model;
   markDirty(); renderRuleList(); renderEditor(); renderAccounts(); renderModelPicker();
