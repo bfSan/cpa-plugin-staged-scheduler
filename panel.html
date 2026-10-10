@@ -285,24 +285,20 @@ pre.dump{background:var(--code-bg);color:var(--code-fg);border-radius:8px;paddin
       <div class="bar" style="border-bottom:0;padding-top:0">
         <span class="ver" id="modelHint"></span>
         <span class="spacer"></span>
-        <select id="joinTarget" style="min-width:190px" title="把选中的模型挂到哪条已有规则下">
-          <option value="">（加入已有规则…）</option>
-        </select>
-        <button id="btnJoinRule" disabled>加入这条规则</button>
         <button class="primary" id="btnAddRule" disabled>新建规则</button>
       </div>
       <div class="note">
         列表取自 CPA 的 <code>/v1/models</code>（用配置里的下游 key 取并集），所以这里的每个 ID
         都是客户端真实能请求到的；配了规则就一定匹配得上。没有规则的模型一律交回 CPA 内置调度。
-        <br>要让多个模型共用同一套阶梯，先在上面把它们一起选中，再点「加入这条规则」挂到已有规则下；
-        阶梯里的账号必须能服务每一个模型，否则对某些模型的请求会走进空池。
+        <br>要让多个模型共用同一套阶梯：先在上面把它们一起选中，再到下面「已有规则」里对某条规则点
+        「加入」；阶梯里的账号必须能服务每一个模型，否则对某些模型的请求会走进空池。
       </div>
     </section>
 
     <section class="card" id="rulesCard">
-      <h2>已有规则 <span class="hint">点一条查看/编辑，再点一次收起</span>
+      <h2>已有规则 <span class="hint" id="ruleHint">点一条查看/编辑，再点一次收起</span>
         <span class="spacer"></span><span class="chip" id="ruleCnt"></span></h2>
-      <div class="body" style="max-height:280px">
+      <div class="body" style="max-height:300px">
         <ul class="rules" id="ruleRows"></ul>
       </div>
     </section>
@@ -459,7 +455,7 @@ const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&a
 let accounts = [];            // CPA 凭据（含可用性）
 let modelCatalog = null;      // Map<凭据name, Set<上游模型id>>，仅用于判断“哪个账号能服务该模型”
 let downstream = [];          // [{id, channel, upstream}] 下游最终可见的模型
-let aliasIndex = {};          // 下游模型 id -> {channel, upstream}（仅用于展示来源）
+let aliasIndex = {};          // 下游模型 id -> [{channel, upstream}]（仅用于展示来源，按渠道取）
 let selectedModels = [];      // 模型选择器里勾选的模型 id（顺序即规则名优先序）
 let rules = {};               // model -> rule 配置（本地编辑态）
 let savedRules = {};          // 保存成功的快照，用于 dirty
@@ -693,8 +689,10 @@ function channelOf(id){
   const provs = providersForModel(id);
   if (provs.length === 1) return provs[0];
   if (provs.length > 1) return "多渠道";
-  const a = aliasIndex[id];
-  if (a && a.channel) return a.channel;
+  // 没有凭据目录佐证时退回别名表：别名所属渠道就是它的渠道。多个渠道都登记了
+  // 同一别名时无法判定，宁可归入"未归属"也不要随便挑一个。
+  const recs = aliasIndex[id] || [];
+  if (recs.length === 1) return recs[0].channel;
   return "未归属";
 }
 
@@ -719,7 +717,9 @@ function renderModelPicker(){
   const shown = downstream.filter(m => {
     if (onlyUnruled && (rules[m.id] || selectedModels.includes(m.id))) return false;
     if (!q) return true;
-    return (m.id + " " + m.channel + " " + (m.upstream || "")).toLowerCase().includes(q);
+    // 上游名也可搜：用户可能记得渠道自己的叫法。按渠道取（见 upstreamOf），
+    // 免得搜到别的渠道的同名别名。
+    return (m.id + " " + m.channel + " " + upstreamOf(m.id, m.channel)).toLowerCase().includes(q);
   });
 
   $("modelCount").textContent = shown.length + " / " + downstream.length;
@@ -749,27 +749,38 @@ function renderModelPicker(){
   });
   const owned = Object.keys(rules).length;
   $("modelHint").textContent = owned
-    ? `已有 ${owned} 条规则。点模型可多选，再选「新建规则」或「加入这条规则」。`
+    ? `已有 ${owned} 条规则。点模型可多选；新建规则点「新建规则」，挂到已有规则去下面点「加入」。`
     : "点模型可多选；选好后点「新建规则」，第一个选中项作为规则名。";
   renderModelSummary();
 }
 
-// group 是这条 chip 落在哪一组，用来判断上游名标注能不能显示。
+// upstreamOf 返回某个模型在**它所属渠道内**的上游真名，仅用于展示。
 //
-// 上游名是**某个渠道自己的叫法**，所以它只在"唯一渠道服务该模型"时才有意义。
-// 多渠道组里各渠道的名字根本不同：deepseek-v4.1-flash 在 qoder 叫 dfmodel，
-// 在 trae 就叫它自己。此时挑一个来显示等于替其他渠道说话，标注必须是错的，
-// 因此不显示。（下游可见 ID 不能省，它就是规则 key，也是要选的东西。）
+// 别名只在自己渠道内生效，所以上游名也必须按渠道查。早期版本按 alias 全局建了
+// 单个索引（alias -> 上游名，后写的渠道会盖掉先写的），面板上就出现了跨渠道串味：
+// trae 组的 GLM-5.3 被标成 ← gmodel，而 gmodel 是 qoder 的叫法。
+//
+// 注意 GLM-5.3 是两个渠道都真正服务的模型（qoder 用别名 gmodel，trae 用上游原名），
+// 所以它归在「多渠道」。多渠道下各渠道叫法不同，挑一个显示就是替其他渠道说话，
+// 因此不显示；同理"未归属"也无从谈起。只有渠道唯一、且该渠道的别名表里确实登记了
+// 这个别名时，上游名才有确定含义。
+function upstreamOf(id, group){
+  if (!group || group === "多渠道" || group === "未归属") return "";
+  const recs = aliasIndex[id] || [];
+  const hit = recs.find(r => r.channel === group);
+  return hit ? (hit.upstream || "") : "";
+}
+
+// group 是这条 chip 落在哪一组，用来判断上游名标注能不能显示。
 function modelChip(m, group){
   const isRule = !!rules[m.id];
   const isSel = selectedModels.includes(m.id);
   const cls = isRule ? "mchip owned" : (isSel ? "mchip on" : "mchip");
-  const single = group && group !== "多渠道" && group !== "未归属";
-  const upstream = single ? (m.upstream || "") : "";
+  const upstream = upstreamOf(m.id, group);
   const up = upstream ? `<span class="sub">← ${esc(upstream)}</span>` : "";
   const tag = isRule ? '<span class="sub">已有规则</span>' : "";
   // 多渠道时改在悬停里列出服务它的渠道，那才是这个分组真正能提供的信息。
-  const provs = single ? [] : providersForModel(m.id);
+  const provs = (group === "多渠道" || group === "未归属") ? providersForModel(m.id) : [];
   const title = upstream ? `${m.id} ← ${upstream}`
     : provs.length > 1 ? `${m.id}（${provs.join(" + ")} 都能服务）`
     : m.id;
@@ -788,7 +799,8 @@ function toggleModel(id){
 function renderModelSummary(){
   const bar = $("modelSummary");
   $("btnAddRule").disabled = !selectedModels.length;
-  renderJoinTarget();
+  // 选中集合变了，规则行上的「加入 N 个」按钮要跟着出现/消失/改数字。
+  renderRuleList();
   if (!selectedModels.length) { bar.style.display = "none"; bar.innerHTML = ""; return; }
   bar.style.display = "";
   const common = commonAccounts(selectedModels);
@@ -809,34 +821,35 @@ function renderModelSummary(){
   });
 }
 
-// 把当前选中的模型挂到一条已有规则下。这里同时负责下拉候选与按钮可用性：
-// 下拉只列"选了之后能真正共用"的规则，判据与点击时的校验完全一致 —— 之前两处
-// 判据不同（一个与规则名单比、一个与规则名单独比），才会出现"能选却加不进去"。
-function renderJoinTarget(){
-  const sel = $("joinTarget");
-  if (!sel) return;
-  const keep = sel.value;
+// joinRejectReason 判定"这些模型能不能挂到这条规则下"，返回 null 表示可以。
+//
+// 候选过滤与点击校验共用这一个函数，所以规则行上亮着的「加入」按钮必然是能挂上
+// 的。早前是分开写的：候选按下拉时用了较松的判据（只跟规则名比），点击时用了较
+// 严的判据（跟全部覆盖模型比），于是下拉里列出的模型点下去常被拒。
+function joinRejectReason(chosen, covered){
+  if (!chosen.length) return "没有选中可加入的模型";
+  const bad = chosen.filter(m => canShareWith(m, covered) === false);
+  if (bad.length) return "与这条规则的阶梯没有共同账号，加了不会生效：" + bad.join("、");
+  return null;
+}
+
+// joinSelectedInto 把当前选中的模型挂到 owner 规则下。
+function joinSelectedInto(owner){
+  if (!rules[owner]) { toast("err", "这条规则已不存在，请刷新"); return; }
   const chosen = selectedModels.filter(m => !rules[m]);
-  if (!chosen.length) {
-    sel.innerHTML = '<option value="">（加入已有规则…）</option>';
-    sel.value = "";
-    sel.disabled = true;
-    $("btnJoinRule").disabled = true;
-    return;
-  }
-  sel.disabled = false;
-  const targets = Object.keys(rules).sort().filter(owner => {
-    const covered = [owner].concat(rules[owner].sharedWith || []);
-    if (chosen.some(m => covered.includes(m))) return false;   // 已在其中
-    return canShareWith(chosen[0], covered) !== false && chosen.every(m => canShareWith(m, covered) !== false);
-  });
-  sel.innerHTML = '<option value="">（加入已有规则…）</option>' +
-    targets.map(o => {
-      const n = (rules[o].sharedWith || []).length;
-      return `<option value="${esc(o)}">${esc(o)}${n ? "（已覆盖 " + (n + 1) + " 个模型）" : ""}</option>`;
-    }).join("");
-  if (targets.includes(keep)) sel.value = keep; else sel.value = "";
-  $("btnJoinRule").disabled = !sel.value;
+  if (!chosen.length) { toast("err", "先在上面选中要加入的模型"); return; }
+  const covered = [owner].concat(rules[owner].sharedWith || []);
+  const already = chosen.filter(m => covered.includes(m));
+  if (already.length) { toast("err", "这些模型已经在覆盖范围内：" + already.join("、")); return; }
+  const reason = joinRejectReason(chosen, covered);
+  if (reason) { toast("err", reason); return; }
+
+  rules[owner].sharedWith = (rules[owner].sharedWith || []).concat(chosen);
+  const common = commonAccounts([owner].concat(rules[owner].sharedWith));
+  toast("ok", "已加入 " + chosen.length + " 个模型，现在共同可用账号 " + (common ? common.size : "?") + " 个");
+  selectedModels = [];
+  editing = owner;
+  markDirty(); renderRuleList(); renderEditor(); renderAccounts(); renderModelPicker();
 }
 
 /* ---- 规则 ---- */
@@ -891,10 +904,13 @@ function renderRuleList(){
   // 试算下拉只列已配规则的模型，所以规则一变就得跟着刷新，否则删完规则它还
   // 留着一个不存在的选项。
   fillPreviewModels();
-  // 同理，「加入这条规则」的候选就是这些规则：增删后不刷新的话，下拉会留着
-  // 已删掉的规则，选中后只会得到一句"规则已不存在"。
-  renderJoinTarget();
   const box = $("ruleRows");
+  // 有未配规则的模型被选中时，每条规则都长出「加入」按钮 —— 挂载动作就发生
+  // 在规则上，不需要再去别处挑一次规则（那正是"两个规则列表"的由来）。
+  const joining = selectedModels.filter(m => !rules[m]);
+  $("ruleHint").textContent = joining.length
+    ? ("已选 " + joining.length + " 个模型，点某条规则的「加入」即可挂上去")
+    : "点一条查看/编辑，再点一次收起";
   if (!models.length) {
     box.innerHTML = '<li class="empty">还没有规则。没有规则的模型由 CPA 内置调度处理。</li>';
     return;
@@ -911,14 +927,28 @@ function renderRuleList(){
     const accs = rule.strategy === "staged"
       ? new Set((rule.stages || []).flatMap(s => s.accounts || [])).size : null;
     const accChip = accs === null ? "" : `<span class="chip">${accs} 个账号</span>`;
+
+    // 「加入」按钮：判据与点击时的校验完全一致（见 joinSelectedInto），所以能点就
+    // 一定能挂上。不能挂的规则按钮置灰并说明原因，而不是让它点下去才被拒。
+    let joinBtn = "";
+    if (joining.length) {
+      const covered = [model].concat(rule.sharedWith || []);
+      const clash = joining.filter(m => covered.includes(m));
+      const reason = joinRejectReason(joining, covered);
+      const ok = !clash.length && !reason;
+      joinBtn = `<button class="mini${ok ? " primary" : ""}" data-join="${esc(model)}"
+        ${ok ? "" : "disabled"} title="${esc(clash.length ? "选中的模型已在覆盖范围内" : (reason || "把选中的模型挂到这条规则下"))}"
+        >加入 ${joining.length} 个</button>`;
+    }
     return `<li data-model="${esc(model)}" class="${model === editing ? "on" : ""}" title="点击查看/编辑，再点一次收起">
       <span class="m">${esc(model)} ${shared}${accChip}<br><span class="ver">${esc(detail)}</span></span>
+      ${joinBtn}
       <button class="mini" data-del="${esc(model)}">删除</button>
     </li>`;
   }).join("");
   box.querySelectorAll("li[data-model]").forEach(li => {
     li.addEventListener("click", e => {
-      if (e.target.hasAttribute("data-del")) return;
+      if (e.target.closest("button")) return;   // 行内按钮各自处理
       const model = li.getAttribute("data-model");
       // 再点一次选中项就收起详情。进入面板时若已自动选中了某条规则，用户也
       // 必须能把它关掉 —— 之前只能通过"删掉它"或选中别的规则来摆脱，等于没有出口。
@@ -926,6 +956,9 @@ function renderRuleList(){
       renderRuleList(); renderEditor(); renderAccounts();
       if (editing && rules[editing]) $("pvModel").value = editing;
     });
+  });
+  box.querySelectorAll("button[data-join]").forEach(btn => {
+    btn.addEventListener("click", () => joinSelectedInto(btn.getAttribute("data-join")));
   });
   box.querySelectorAll("button[data-del]").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -1003,7 +1036,7 @@ function renderEditor(){
 // 这里只**展示**覆盖关系，不再提供"挑一个模型加进来"的下拉框 —— 那个下拉框的
 // 候选是按"与该规则名单独比"算的，而加入按钮是按"与全部覆盖模型合比"算的，两处
 // 判据不一致，于是列出来的模型点下去常被拒（用户看到的就是"能选却加不了"）。
-// 现在统一走「选择模型」区的多选 + 「加入这条规则」，候选与校验用同一套判据。
+// 现在统一走「选择模型」区的多选，再在规则行上点「加入」；候选与校验用同一套判据。
 function aliasBarHtml(rule){
   const covered = [editing].concat(rule.sharedWith || []);
   const common = commonAccounts(covered);
@@ -1031,7 +1064,7 @@ function aliasBarHtml(rule){
       建议拆成多条规则：把“同一渠道、能共用账号”的模型放在一起。
     </div>` : ""}
     <div class="stage-note">
-      要再挂一个模型上来：回到上面「选择模型」区选中它，再点「加入这条规则」。
+      要再挂一个模型上来：回到上面「选择模型」区选中它，再点本规则的「加入」按钮。
       共用同一阶梯的模型各自维护自己的轮转位置，两条流量不会互相干扰；某个 ID 若已是独立规则则不能共用。
     </div>
   </div>`;
@@ -1042,7 +1075,7 @@ function bindAliasBar(rule){
     btn.addEventListener("click", () => {
       const value = btn.getAttribute("data-alias-del");
       rule.sharedWith = (rule.sharedWith || []).filter(x => x !== value);
-      markDirty(); renderEditor(); renderRuleList(); renderJoinTarget();
+      markDirty(); renderEditor(); renderRuleList();
     });
   });
 }
@@ -1381,11 +1414,9 @@ async function boot(){
 // 拉取下游权威模型列表并渲染选择器。
 async function refreshDownstreamModels(){
   const ids = await loadDownstreamModels();
-  downstream = ids.map(id => ({
-    id: id,
-    channel: channelOf(id),
-    upstream: (aliasIndex[id] || {}).upstream || ""
-  }));
+  // upstream 不再在这里一次性定死：它取决于模型落在哪个分组（见 upstreamOf），
+  // 而分组是按渠道算的，两者必须在渲染时一起判断。
+  downstream = ids.map(id => ({ id: id, channel: channelOf(id) }));
   renderModelPicker();
   fillPreviewModels();
   return downstream.length;
@@ -1393,6 +1424,11 @@ async function refreshDownstreamModels(){
 
 // 只有别名表能告诉我们某个下游 ID 的渠道与上游真名，但它不代表“客户端可见”，
 // 所以它只做标注，绝不作为可选模型的来源。
+//
+// 同一个别名可能出现在多个渠道的表里（qoder 的 gmodel -> glm-5.3、trae 的
+// custom_model_gemini -> trae-custom_model_gemini …），所以一个别名对应**多条**
+// 记录，必须全部留下再按渠道挑选。早前用单个对象存放，后写的渠道会盖掉先写的，
+// 于是标注就串到了别的渠道上。
 async function loadAliasIndex(){
   aliasIndex = {};
   try {
@@ -1400,7 +1436,9 @@ async function loadAliasIndex(){
     const table = (d && (d["oauth-model-alias"] || d)) || {};
     Object.keys(table).forEach(channel => {
       (table[channel] || []).forEach(row => {
-        if (row && row.alias) aliasIndex[row.alias] = { channel: channel, upstream: row.name || "" };
+        if (!row || !row.alias) return;
+        if (!aliasIndex[row.alias]) aliasIndex[row.alias] = [];
+        aliasIndex[row.alias].push({ channel: channel, upstream: row.name || "" });
       });
     });
   } catch (_) {
@@ -1438,15 +1476,22 @@ $("modelFilter").addEventListener("input", renderModelPicker);
 $("modelOnlyUnruled").addEventListener("change", renderModelPicker);
 $("btnModelReload").addEventListener("click", () => busy($("btnModelReload"), async () => {
   await loadAliasIndex();
+  // 模型目录也必须重取。它是"哪个账号能服务哪个模型"的唯一依据，而宿主的注册
+  // 是动态的：插件重载凭据、渠道目录变化都会让某个模型多出/少掉服务方。只刷新
+  // 下游列表而不刷新它，分组与「可服务账号」就会停在打开面板那一刻的旧快照上
+  // （实测 qoder 的客户端目录会在两个状态间变化，缓存住就会把模型一直算成单渠道）。
+  modelCatalog = null;
+  await loadModelCatalog();
   const n = await refreshDownstreamModels();
-  toast("ok", "已读取 " + n + " 个下游模型");
+  renderAccounts(); renderEditor();
+  toast("ok", "已读取 " + n + " 个下游模型，并刷新了账号模型目录");
 }));
 
 $("btnAddRule").addEventListener("click", () => {
   const chosen = selectedModels.slice();
   const model = chosen[0];
   if (!model) { toast("err", "先在上面的列表里点选至少一个模型"); return; }
-  if (rules[model]) { toast("err", "该模型已有规则，用「加入这条规则」把它挂到已有规则下"); editing = model; renderRuleList(); renderEditor(); return; }
+  if (rules[model]) { toast("err", "该模型已有规则；要让它和别的模型共用阶梯，请选中那些模型后点本规则的「加入」"); editing = model; renderRuleList(); renderEditor(); return; }
 
   const shared = chosen.slice(1).filter(a => a !== model);
   const clash = shared.filter(a => rules[a]);
@@ -1479,36 +1524,6 @@ $("btnAddRule").addEventListener("click", () => {
     const common = commonAccounts([model].concat(shared));
     toast("ok", "这条规则覆盖 " + (shared.length + 1) + " 个模型，共同可用账号 " + (common ? common.size : "?") + " 个");
   }
-});
-
-// 把选中的模型挂到已有规则下。校验与 renderJoinTarget 的候选过滤用同一判据，
-// 所以下拉里能选中的就一定能挂上。
-$("btnJoinRule").addEventListener("click", () => {
-  const owner = $("joinTarget").value;
-  if (!owner) { toast("err", "先在下拉里选一条已有规则"); return; }
-  if (!rules[owner]) { toast("err", "这条规则已不存在，请刷新"); return; }
-  const chosen = selectedModels.filter(m => !rules[m]);
-  if (!chosen.length) { toast("err", "先在上面选中要加入的模型"); return; }
-
-  const covered = [owner].concat(rules[owner].sharedWith || []);
-  const already = chosen.filter(m => covered.includes(m));
-  if (already.length) { toast("err", "这些模型已经在覆盖范围内：" + already.join("、")); return; }
-  const bad = chosen.filter(m => canShareWith(m, covered) === false);
-  if (bad.length) {
-    toast("err", "这些模型与「" + owner + "」的阶梯没有共同账号，加了不会生效：" + bad.join("、"));
-    return;
-  }
-
-  rules[owner].sharedWith = (rules[owner].sharedWith || []).concat(chosen);
-  const common = commonAccounts([owner].concat(rules[owner].sharedWith));
-  toast("ok", "已加入 " + chosen.length + " 个模型，现在共同可用账号 " + (common ? common.size : "?") + " 个");
-  selectedModels = [];
-  editing = owner;
-  markDirty(); renderRuleList(); renderEditor(); renderAccounts(); renderModelPicker();
-});
-
-$("joinTarget").addEventListener("change", () => {
-  $("btnJoinRule").disabled = !$("joinTarget").value;
 });
 
 $("btnEditClose").addEventListener("click", () => {
