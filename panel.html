@@ -52,6 +52,14 @@ header h1{font-size:16px;margin:0;font-weight:600}
 .spacer{flex:1 1 auto}
 main{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:14px;padding:16px;max-width:1660px;margin:0 auto;align-items:start}
 @media (max-width:1100px){main{grid-template-columns:minmax(0,1fr)}}
+/* 保存条固定在视口底部：规则详情在页面很下方，改完不该再滚回顶部去保存。
+   body 用 padding-bottom 让出它的高度，否则最后一张卡片会被压住。 */
+body{padding-bottom:64px}
+#saveBar{position:fixed;left:0;right:0;bottom:0;z-index:900;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 16px;background:var(--card);border-top:1px solid var(--border);
+  box-shadow:0 -2px 10px rgba(0,0,0,.06)}
+#saveBar .grow{flex:1 1 auto;min-width:0}
 .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-md);
   overflow:hidden;display:flex;flex-direction:column;min-width:0}
 .card>h2{margin:0;padding:12px 14px;font-size:14px;font-weight:600;border-bottom:1px solid var(--border);
@@ -96,6 +104,12 @@ ul.rules li{display:flex;align-items:center;gap:8px;padding:6px 8px;border-botto
 ul.rules li:last-child{border-bottom:0}
 ul.rules li.on{background:var(--acc-ring);font-weight:600}
 ul.rules .m{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;font-size:13px}
+/* 一行规则现在带两个 chip 和一行说明，用 flex 让它们在同一行里自然换行，
+   而不是挤成一长条把"删除"推出去。 */
+ul.rules li{align-items:flex-start}
+ul.rules .m .chip{margin-left:6px;font-size:11px;padding:1px 6px;vertical-align:middle}
+ul.rules .m .ver{display:inline-block;margin-top:2px}
+ul.rules li>button{align-self:center;flex:0 0 auto}
 /* stage 编排 */
 .stage{border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:10px;background:var(--surface)}
 .stage.lead{border-color:var(--acc)}
@@ -257,38 +271,46 @@ pre.dump{background:var(--code-bg);color:var(--code-fg);border-radius:8px;paddin
   <!-- 规则 -->
   <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
     <section class="card">
-      <h2>规则 <span class="hint">模型 ID 就是下游最终拿到的那个字符串</span>
-        <span class="spacer"></span><span class="chip" id="ruleCnt"></span></h2>
+      <h2>选择模型 <span class="hint">模型 ID 就是下游最终拿到的那个字符串</span>
+        <span class="spacer"></span><span class="chip" id="modelCount"></span></h2>
       <div class="bar">
         <input type="search" class="grow" id="modelFilter" placeholder="搜索模型 ID / 渠道">
         <label class="chk"><input type="checkbox" id="modelOnlyUnruled">只看没配规则的</label>
-        <span class="spacer"></span>
-        <span class="chip" id="modelCount"></span>
         <button class="mini" id="btnModelReload">重新读取</button>
-        <button class="primary" id="btnAddRule">为选中模型新建规则</button>
       </div>
       <div id="modelSummary" class="summary" style="display:none"></div>
-      <div class="body" style="max-height:360px">
+      <div class="body" style="max-height:340px">
         <div id="modelPicker"></div>
       </div>
       <div class="bar" style="border-bottom:0;padding-top:0">
         <span class="ver" id="modelHint"></span>
         <span class="spacer"></span>
-        <button class="primary" id="btnSaveRules" disabled>保存到 CPA</button>
-        <button id="btnRevertRules" disabled>放弃改动</button>
-      </div>
-      <div class="body" style="max-height:200px;border-top:1px solid var(--border)">
-        <ul class="rules" id="ruleRows"></ul>
+        <select id="joinTarget" style="min-width:190px" title="把选中的模型挂到哪条已有规则下">
+          <option value="">（加入已有规则…）</option>
+        </select>
+        <button id="btnJoinRule" disabled>加入这条规则</button>
+        <button class="primary" id="btnAddRule" disabled>新建规则</button>
       </div>
       <div class="note">
         列表取自 CPA 的 <code>/v1/models</code>（用配置里的下游 key 取并集），所以这里的每个 ID
         都是客户端真实能请求到的；配了规则就一定匹配得上。没有规则的模型一律交回 CPA 内置调度。
+        <br>要让多个模型共用同一套阶梯，先在上面把它们一起选中，再点「加入这条规则」挂到已有规则下；
+        阶梯里的账号必须能服务每一个模型，否则对某些模型的请求会走进空池。
+      </div>
+    </section>
+
+    <section class="card" id="rulesCard">
+      <h2>已有规则 <span class="hint">点一条查看/编辑，再点一次收起</span>
+        <span class="spacer"></span><span class="chip" id="ruleCnt"></span></h2>
+      <div class="body" style="max-height:280px">
+        <ul class="rules" id="ruleRows"></ul>
       </div>
     </section>
 
     <section class="card" id="editorCard">
       <h2>规则详情 <span class="hint" id="editHint">从上面选一条规则</span>
-        <span class="spacer"></span><span class="chip" id="editAvail"></span></h2>
+        <span class="spacer"></span><span class="chip" id="editAvail"></span>
+        <button class="mini" id="btnEditClose" title="收起规则详情" style="display:none">收起 ✕</button></h2>
       <div class="bar">
         <label class="chk">策略</label>
         <select id="editStrategy" style="flex:1 1 220px"></select>
@@ -330,6 +352,14 @@ pre.dump{background:var(--code-bg);color:var(--code-fg);border-radius:8px;paddin
     </section>
   </div>
 </main>
+
+<!-- 保存条固定在视口底部：规则详情在页面很下方，改完不该再滚回顶部去保存。 -->
+<div id="saveBar">
+  <span class="ver" id="saveHint">没有未保存的改动</span>
+  <span class="spacer"></span>
+  <button id="btnRevertRules" disabled>放弃改动</button>
+  <button class="primary" id="btnSaveRules" disabled>保存到 CPA</button>
+</div>
 
 <div id="toasts"></div>
 
@@ -464,6 +494,7 @@ function markDirty(){
   dirty = true;
   $("src").textContent = "有未保存的修改";
   $("src").className = "chip none";
+  $("saveHint").textContent = "有未保存的修改";
   $("btnSaveRules").disabled = false;
   $("btnRevertRules").disabled = false;
 }
@@ -471,6 +502,7 @@ function markClean(configured){
   dirty = false;
   $("src").textContent = configured ? "规则来自配置" : "未配置规则";
   $("src").className = "chip" + (configured ? " hit" : " none");
+  $("saveHint").textContent = configured ? "已与 CPA 一致" : "没有未保存的改动";
   $("btnSaveRules").disabled = true;
   $("btnRevertRules").disabled = true;
 }
@@ -679,6 +711,7 @@ function renderModelPicker(){
     box.innerHTML = '<div class="empty">还没有取到下游模型列表。</div>';
     $("modelCount").textContent = "";
     $("modelHint").textContent = "";
+    renderModelSummary();
     return;
   }
   const q = $("modelFilter").value.trim().toLowerCase();
@@ -716,8 +749,8 @@ function renderModelPicker(){
   });
   const owned = Object.keys(rules).length;
   $("modelHint").textContent = owned
-    ? `已有 ${owned} 条规则。点模型可多选，再点「为选中模型新建规则」共用一套阶梯。`
-    : "点模型可多选，再点「为选中模型新建规则」；第一个选中项作为规则名。";
+    ? `已有 ${owned} 条规则。点模型可多选，再选「新建规则」或「加入这条规则」。`
+    : "点模型可多选；选好后点「新建规则」，第一个选中项作为规则名。";
   renderModelSummary();
 }
 
@@ -744,28 +777,28 @@ function modelChip(m, group){
 }
 
 function toggleModel(id){
-  if (rules[id]) { editing = id; renderRuleList(); renderEditor(); return; }
+  // 已有规则的模型：点一下就是查看它（再点一次收起，见 renderRuleList）。
+  if (rules[id]) { editing = (editing === id) ? null : id; renderRuleList(); renderEditor(); renderAccounts(); return; }
   const i = selectedModels.indexOf(id);
-  if (i >= 0) { selectedModels.splice(i, 1); renderModelPicker(); return; }
-  // 多选是为了建一条“共用阶梯”的规则，所以新选的模型必须和已选的共享账号，
-  // 否则规则对其中一个不生效。这里直接拦下并说明原因，比事后警告清楚。
-  if (selectedModels.length && canShareWith(id, selectedModels) === false) {
-    const first = selectedModels[0];
-    toast("err", "「" + id + "」和「" + first + "」没有共同账号，不能共用一套阶梯。" +
-      "共用阶梯要求每个模型都能被阶梯里的账号服务，否则对该模型的请求会被跳过。" +
-      "请分别为它们建规则。");
-    return;
-  }
-  selectedModels.push(id);
+  if (i >= 0) selectedModels.splice(i, 1); else selectedModels.push(id);
   renderModelPicker();
 }
 
-// 已选摘要：多选后能看到自己到底选了哪些，并能单个撤掉。
+// 已选摘要：多选后能看到自己到底选了哪些、能不能共用、以及怎么落地。
 function renderModelSummary(){
   const bar = $("modelSummary");
+  $("btnAddRule").disabled = !selectedModels.length;
+  renderJoinTarget();
   if (!selectedModels.length) { bar.style.display = "none"; bar.innerHTML = ""; return; }
   bar.style.display = "";
-  bar.innerHTML = `<span class="ver">已选 ${selectedModels.length} 个，第一个作为规则名，其余共用同一套阶梯 ${esc(selectedModels.length === 1 ? "（单个模型，可单独配一套账号顺序）" : (commonAccounts(selectedModels) ? "共同可用账号 " + commonAccounts(selectedModels).size + " 个" : "正在判断共同账号…"))}：</span>` +
+  const common = commonAccounts(selectedModels);
+  const canShare = selectedModels.length > 1 ? (common ? common.size > 0 : null) : null;
+  const verdict = selectedModels.length === 1
+    ? "（单个模型，可单独配一套账号顺序）"
+    : canShare === true ? "共同可用账号 " + common.size + " 个，可以共用一套阶梯"
+    : canShare === null ? "正在判断共同账号…"
+    : "没有共同可用账号，不能共用一套阶梯";
+  bar.innerHTML = `<span class="ver">已选 ${selectedModels.length} 个，第一个作为规则名：${verdict}</span>` +
     selectedModels.map(m => `<span class="schip">${esc(m)}<button data-unpick="${esc(m)}" title="移除">×</button></span>`).join("");
   bar.querySelectorAll("button[data-unpick]").forEach(b => {
     b.addEventListener("click", () => {
@@ -774,6 +807,36 @@ function renderModelSummary(){
       renderModelPicker();
     });
   });
+}
+
+// 把当前选中的模型挂到一条已有规则下。这里同时负责下拉候选与按钮可用性：
+// 下拉只列"选了之后能真正共用"的规则，判据与点击时的校验完全一致 —— 之前两处
+// 判据不同（一个与规则名单比、一个与规则名单独比），才会出现"能选却加不进去"。
+function renderJoinTarget(){
+  const sel = $("joinTarget");
+  if (!sel) return;
+  const keep = sel.value;
+  const chosen = selectedModels.filter(m => !rules[m]);
+  if (!chosen.length) {
+    sel.innerHTML = '<option value="">（加入已有规则…）</option>';
+    sel.value = "";
+    sel.disabled = true;
+    $("btnJoinRule").disabled = true;
+    return;
+  }
+  sel.disabled = false;
+  const targets = Object.keys(rules).sort().filter(owner => {
+    const covered = [owner].concat(rules[owner].sharedWith || []);
+    if (chosen.some(m => covered.includes(m))) return false;   // 已在其中
+    return canShareWith(chosen[0], covered) !== false && chosen.every(m => canShareWith(m, covered) !== false);
+  });
+  sel.innerHTML = '<option value="">（加入已有规则…）</option>' +
+    targets.map(o => {
+      const n = (rules[o].sharedWith || []).length;
+      return `<option value="${esc(o)}">${esc(o)}${n ? "（已覆盖 " + (n + 1) + " 个模型）" : ""}</option>`;
+    }).join("");
+  if (targets.includes(keep)) sel.value = keep; else sel.value = "";
+  $("btnJoinRule").disabled = !sel.value;
 }
 
 /* ---- 规则 ---- */
@@ -828,6 +891,9 @@ function renderRuleList(){
   // 试算下拉只列已配规则的模型，所以规则一变就得跟着刷新，否则删完规则它还
   // 留着一个不存在的选项。
   fillPreviewModels();
+  // 同理，「加入这条规则」的候选就是这些规则：增删后不刷新的话，下拉会留着
+  // 已删掉的规则，选中后只会得到一句"规则已不存在"。
+  renderJoinTarget();
   const box = $("ruleRows");
   if (!models.length) {
     box.innerHTML = '<li class="empty">还没有规则。没有规则的模型由 CPA 内置调度处理。</li>';
@@ -841,17 +907,24 @@ function renderRuleList(){
     // 与它共用同一套阶梯的模型：列表里先给个数量提示，细节在规则详情里看。
     const shared = (rule.sharedWith && rule.sharedWith.length)
       ? `<span class="chip">+${rule.sharedWith.length} 个模型共用</span>` : "";
-    return `<li data-model="${esc(model)}" class="${model === editing ? "on" : ""}">
-      <span class="m">${esc(model)} ${shared}<br><span class="ver">${esc(detail)}</span></span>
+    // 阶梯里的账号数：规则是否"真的会生效"最直观的指标，列表里就该看出来。
+    const accs = rule.strategy === "staged"
+      ? new Set((rule.stages || []).flatMap(s => s.accounts || [])).size : null;
+    const accChip = accs === null ? "" : `<span class="chip">${accs} 个账号</span>`;
+    return `<li data-model="${esc(model)}" class="${model === editing ? "on" : ""}" title="点击查看/编辑，再点一次收起">
+      <span class="m">${esc(model)} ${shared}${accChip}<br><span class="ver">${esc(detail)}</span></span>
       <button class="mini" data-del="${esc(model)}">删除</button>
     </li>`;
   }).join("");
   box.querySelectorAll("li[data-model]").forEach(li => {
     li.addEventListener("click", e => {
       if (e.target.hasAttribute("data-del")) return;
-      editing = li.getAttribute("data-model");
+      const model = li.getAttribute("data-model");
+      // 再点一次选中项就收起详情。进入面板时若已自动选中了某条规则，用户也
+      // 必须能把它关掉 —— 之前只能通过"删掉它"或选中别的规则来摆脱，等于没有出口。
+      editing = (editing === model) ? null : model;
       renderRuleList(); renderEditor(); renderAccounts();
-      if (rules[editing]) $("pvModel").value = editing;
+      if (editing && rules[editing]) $("pvModel").value = editing;
     });
   });
   box.querySelectorAll("button[data-del]").forEach(btn => {
@@ -868,6 +941,7 @@ function renderRuleList(){
 function renderEditor(){
   const card = $("editorBody");
   const model = editing;
+  $("btnEditClose").style.display = (model && rules[model]) ? "" : "none";
   if (!model || !rules[model]) {
     $("editHint").textContent = "从上面选一条规则";
     $("editAvail").textContent = "";
@@ -924,28 +998,27 @@ function renderEditor(){
 
 // aliasBarHtml 渲染“这条规则还覆盖哪些模型”。共用是有条件的：阶梯里写的账号
 // 必须真的能服务每一个模型，否则那些模型的请求进来时阶段池是空的、会被跳过，
-// 规则看着配了实际不生效。所以这里把每个模型的可用账号数摆出来，共同账号为 0
-// 时直接标红。
+// 规则看着配了实际不生效。
+//
+// 这里只**展示**覆盖关系，不再提供"挑一个模型加进来"的下拉框 —— 那个下拉框的
+// 候选是按"与该规则名单独比"算的，而加入按钮是按"与全部覆盖模型合比"算的，两处
+// 判据不一致，于是列出来的模型点下去常被拒（用户看到的就是"能选却加不了"）。
+// 现在统一走「选择模型」区的多选 + 「加入这条规则」，候选与校验用同一套判据。
 function aliasBarHtml(rule){
   const covered = [editing].concat(rule.sharedWith || []);
   const common = commonAccounts(covered);
   const bad = common && common.size === 0;
+  if (!rule.sharedWith || !rule.sharedWith.length) return "";
 
   const rows = covered.map(m => {
     const isRule = m === editing;
     const n = modelCatalog ? availableFor(m).length : null;
-    const sharesCommon = !common || isRule || commonAccounts([m, editing])?.size > 0;
     return `<span class="chip ${bad && !isRule ? "err" : ""}" style="margin:0 6px 6px 0">
       ${esc(m)}${isRule ? ' <span class="sub">规则名</span>' : ""}
       <span class="sub">${n === null ? "?" : n} 个账号</span>
       ${isRule ? "" : `<button class="mini" data-alias-del="${esc(m)}" style="margin-left:6px;padding:0 5px">×</button>`}
     </span>`;
   }).join("");
-
-  // 候选：下游真实可见、且与该规则名有共同账号的模型 —— 没有共同账号的选了也
-  // 不生效，所以干脆不列出来，避免再次踩坑。
-  const taken = new Set(covered);
-  const cand = downstream.map(m => m.id).filter(id => !taken.has(id) && !rules[id] && canShareWith(id, [editing]) !== false);
 
   return `<div class="stage" style="background:var(--card)">
     <div class="stage-head">
@@ -957,41 +1030,19 @@ function aliasBarHtml(rule){
       ⚠ 这些模型<strong>没有共同账号</strong>，阶梯对其中部分模型不会生效（请求会交回 CPA 内置调度）。
       建议拆成多条规则：把“同一渠道、能共用账号”的模型放在一起。
     </div>` : ""}
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <select id="aliasPick" style="flex:1 1 220px">
-        <option value="">（选择要一起共用的模型）</option>
-        ${cand.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("")}
-      </select>
-      <button class="mini" id="btnAliasAdd">加入共用</button>
-    </div>
     <div class="stage-note">
-      只列出与 <code>${esc(editing)}</code> 有共同账号的模型。共用同一阶梯的模型
-      各自维护自己的轮转位置，两条流量不会互相干扰；某个 ID 若已是独立规则则不能共用。
+      要再挂一个模型上来：回到上面「选择模型」区选中它，再点「加入这条规则」。
+      共用同一阶梯的模型各自维护自己的轮转位置，两条流量不会互相干扰；某个 ID 若已是独立规则则不能共用。
     </div>
   </div>`;
 }
 
 function bindAliasBar(rule){
-  const add = $("btnAliasAdd");
-  if (add) {
-    add.addEventListener("click", () => {
-      const value = $("aliasPick").value;
-      if (!value) { toast("err", "先在下拉里选一个模型"); return; }
-      if (rules[value]) { toast("err", "该模型已有独立规则，不能作为共用项"); return; }
-      if (canShareWith(value, [editing].concat(rule.sharedWith || [])) === false) {
-        toast("err", "「" + value + "」与当前阶梯没有共同账号，加了也不会生效");
-        return;
-      }
-      rule.sharedWith = rule.sharedWith || [];
-      if (rule.sharedWith.indexOf(value) < 0) rule.sharedWith.push(value);
-      markDirty(); renderEditor(); renderRuleList();
-    });
-  }
   document.querySelectorAll("button[data-alias-del]").forEach(btn => {
     btn.addEventListener("click", () => {
       const value = btn.getAttribute("data-alias-del");
       rule.sharedWith = (rule.sharedWith || []).filter(x => x !== value);
-      markDirty(); renderEditor(); renderRuleList();
+      markDirty(); renderEditor(); renderRuleList(); renderJoinTarget();
     });
   });
 }
@@ -1392,21 +1443,19 @@ $("btnModelReload").addEventListener("click", () => busy($("btnModelReload"), as
 }));
 
 $("btnAddRule").addEventListener("click", () => {
-  // 多选：第一个选中项作为规则名（阶梯挂在它名下），其余模型共用同一套阶梯。
   const chosen = selectedModels.slice();
   const model = chosen[0];
   if (!model) { toast("err", "先在上面的列表里点选至少一个模型"); return; }
-  if (rules[model]) { toast("err", "该模型已有规则"); editing = model; renderRuleList(); renderEditor(); return; }
+  if (rules[model]) { toast("err", "该模型已有规则，用「加入这条规则」把它挂到已有规则下"); editing = model; renderRuleList(); renderEditor(); return; }
 
   const shared = chosen.slice(1).filter(a => a !== model);
-  // 共用项不能是已有规则，否则会被插件判为歧义配置而整份拒绝。
   const clash = shared.filter(a => rules[a]);
   if (clash.length) {
     toast("err", "这些模型已有自己的规则，不能作为共用项：" + clash.join("、"));
     return;
   }
   // 最后一道闸：共用阶梯必须对每个模型都成立（有共同账号），否则那部分模型
-  // 的规则形同虚设。选的时候已经拦过，这里再确认一次防止漏网。
+  // 的规则形同虚设。
   if (shared.length && canShareWith(model, shared) === false) {
     toast("err", "选中的模型之间没有共同账号，无法共用一套阶梯。请拆成多条规则。");
     return;
@@ -1430,6 +1479,41 @@ $("btnAddRule").addEventListener("click", () => {
     const common = commonAccounts([model].concat(shared));
     toast("ok", "这条规则覆盖 " + (shared.length + 1) + " 个模型，共同可用账号 " + (common ? common.size : "?") + " 个");
   }
+});
+
+// 把选中的模型挂到已有规则下。校验与 renderJoinTarget 的候选过滤用同一判据，
+// 所以下拉里能选中的就一定能挂上。
+$("btnJoinRule").addEventListener("click", () => {
+  const owner = $("joinTarget").value;
+  if (!owner) { toast("err", "先在下拉里选一条已有规则"); return; }
+  if (!rules[owner]) { toast("err", "这条规则已不存在，请刷新"); return; }
+  const chosen = selectedModels.filter(m => !rules[m]);
+  if (!chosen.length) { toast("err", "先在上面选中要加入的模型"); return; }
+
+  const covered = [owner].concat(rules[owner].sharedWith || []);
+  const already = chosen.filter(m => covered.includes(m));
+  if (already.length) { toast("err", "这些模型已经在覆盖范围内：" + already.join("、")); return; }
+  const bad = chosen.filter(m => canShareWith(m, covered) === false);
+  if (bad.length) {
+    toast("err", "这些模型与「" + owner + "」的阶梯没有共同账号，加了不会生效：" + bad.join("、"));
+    return;
+  }
+
+  rules[owner].sharedWith = (rules[owner].sharedWith || []).concat(chosen);
+  const common = commonAccounts([owner].concat(rules[owner].sharedWith));
+  toast("ok", "已加入 " + chosen.length + " 个模型，现在共同可用账号 " + (common ? common.size : "?") + " 个");
+  selectedModels = [];
+  editing = owner;
+  markDirty(); renderRuleList(); renderEditor(); renderAccounts(); renderModelPicker();
+});
+
+$("joinTarget").addEventListener("change", () => {
+  $("btnJoinRule").disabled = !$("joinTarget").value;
+});
+
+$("btnEditClose").addEventListener("click", () => {
+  editing = null;
+  renderRuleList(); renderEditor(); renderAccounts();
 });
 
 $("editStrategy").addEventListener("change", () => {
