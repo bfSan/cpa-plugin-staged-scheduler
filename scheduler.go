@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 	"gopkg.in/yaml.v3"
 )
 
@@ -61,8 +61,16 @@ type ruleConfig struct {
 	Models []string `yaml:"models"`
 	// Stages is the staged strategy's account ladder.
 	Stages []stageConfig `yaml:"stages"`
-	// Unlisted decides what happens to candidates no stage names: "exclude"
-	// (default) ignores them, "include" appends them to the final stage.
+	// Unlisted decides what a staged ladder does with a candidate no stage names,
+	// and what happens when the ladder has nothing left to offer:
+	//
+	//   strict  (default) only the listed accounts are ever used; if none is
+	//                     available the pick is rejected rather than handed back,
+	//                     so the ladder is a whitelist
+	//   exclude           only the listed accounts are chosen, but a spent ladder
+	//                     hands back to the host's built-in selector, which may
+	//                     then pick an unlisted credential
+	//   include           unlisted credentials are appended to the final stage
 	Unlisted string `yaml:"unlisted"`
 	// sharedFrom records the rule this entry was expanded from, when this model
 	// was listed under another rule's `models`. It is never configured and never
@@ -120,9 +128,9 @@ func (p *schedulerPlugin) Reconfigure(raw []byte) error {
 
 		rule.Unlisted = strings.ToLower(strings.TrimSpace(rule.Unlisted))
 		switch rule.Unlisted {
-		case "", unlistedExclude:
-			rule.Unlisted = unlistedExclude
-		case unlistedInclude:
+		case "", unlistedStrict:
+			rule.Unlisted = unlistedStrict
+		case unlistedExclude, unlistedInclude:
 		default:
 			return fmt.Errorf("model %q has unsupported unlisted mode %q", normalizedModel, rule.Unlisted)
 		}
@@ -218,11 +226,19 @@ func expandSharedModels(rules map[string]ruleConfig) error {
 	return nil
 }
 
-// unlistedExclude and unlistedInclude decide what happens to a candidate no stage
-// names. Excluding by default is the safe reading: an operator who lists accounts
-// is describing the whole pool, and silently appending an unlisted credential
-// would route traffic to an account they never mentioned.
+// The unlisted modes decide what happens to a candidate no stage names.
+//
+// strict is the default, and the reason it exists: an operator who lists accounts
+// is describing the whole pool they want used. "exclude" alone could not hold
+// that line, because handing back to the host let the built-in selector pick a
+// credential the operator never named -- and with session affinity on, from every
+// priority tier rather than just the top one. strict refuses instead, so a ladder
+// is a whitelist and nothing outside it is ever used.
+//
+// include appends unlisted credentials to the final stage, which is what "burn A,
+// then spread across everything else" means.
 const (
+	unlistedStrict  = "strict"
 	unlistedExclude = "exclude"
 	unlistedInclude = "include"
 )
@@ -362,15 +378,52 @@ func (p *schedulerPlugin) Pick(request pluginapi.SchedulerPickRequest) pluginapi
 // usable account. The host has already removed cooling, disabled and
 // quota-exhausted credentials from Candidates, so "this account is spent" and
 // "advance to the next stage" are the same event: no quota API is needed here.
+// stagedExhausted decides what to answer when no stage of a ladder can produce an
+// account. It is the difference between "a ladder is a preference" and "a ladder
+// is a whitelist", so the rule picks it rather than the code:
+//
+//	strict  refuse, so nothing outside the ladder is ever used. The host treats
+//	        Reject as terminal -- the error carries no HTTP status, so it is not
+//	        in the retryable set and selection stops instead of looping.
+//	exclude hand back to the built-in selector, which may then pick an account no
+//	        stage named.
+//
+// The candidates being empty is not the same situation as every ladder account
+// being spent, but the operator's intent is the same either way: they named the
+// accounts this model may use, and none of them can serve it. Both go through
+// here so a strict ladder cannot be bypassed by the host simply offering fewer
+// candidates.
+// The empty string is the documented default for unlisted, and it has to resolve
+// to strict here rather than only in normalize(). A rule that never went through
+// normalize reaches this point with Unlisted == "": the panel's probe synthesizes
+// a rule for a model that has no saved entry yet, just to preview the strategy.
+// Reading "" as anything other than strict made the preview disagree with the
+// saved result -- it showed a hand-back where saving the same rule produces a
+// refusal, which is the opposite of what the operator is about to get.
+func unlistedMode(rule ruleConfig) string {
+	if rule.Unlisted == "" {
+		return unlistedStrict
+	}
+	return rule.Unlisted
+}
+
+func stagedExhausted(model string, rule ruleConfig) pluginapi.SchedulerPickResponse {
+	if unlistedMode(rule) == unlistedStrict {
+		return pluginapi.SchedulerPickResponse{
+			Handled:      true,
+			Reject:       true,
+			RejectCode:   "auth_unavailable",
+			RejectReason: fmt.Sprintf("model %q: no account in the staged ladder is available, and unlisted is strict", model),
+		}
+	}
+	return pluginapi.SchedulerPickResponse{Handled: false}
+}
+
 func (p *schedulerPlugin) pickStagedLocked(
 	model string,
 	rule ruleConfig,
 	candidates []pluginapi.SchedulerAuthCandidate,
 ) pluginapi.SchedulerPickResponse {
-	if len(candidates) == 0 {
-		return pluginapi.SchedulerPickResponse{Handled: false}
-	}
-
 	available := make(map[string]pluginapi.SchedulerAuthCandidate, len(candidates))
 	for _, candidate := range candidates {
 		id := strings.TrimSpace(candidate.ID)
@@ -382,11 +435,11 @@ func (p *schedulerPlugin) pickStagedLocked(
 		}
 	}
 	if len(available) == 0 {
-		return pluginapi.SchedulerPickResponse{Handled: false}
+		return stagedExhausted(model, rule)
 	}
 
 	stages := rule.Stages
-	includeUnlisted := rule.Unlisted == unlistedInclude
+	includeUnlisted := unlistedMode(rule) == unlistedInclude
 	for index, stage := range stages {
 		// Only the final stage absorbs unlisted credentials: that is what
 		// "burn A, then B, then spill into everything else" means.
@@ -401,7 +454,7 @@ func (p *schedulerPlugin) pickStagedLocked(
 		return pluginapi.SchedulerPickResponse{AuthID: selected, Handled: true}
 	}
 
-	return pluginapi.SchedulerPickResponse{Handled: false}
+	return stagedExhausted(model, rule)
 }
 
 // stagePool returns the candidates of a stage that are actually available,
@@ -748,6 +801,11 @@ type probeStep struct {
 	Handled         bool   `json:"handled"`
 	AuthID          string `json:"auth_id,omitempty"`
 	DelegateBuiltin string `json:"delegate_builtin,omitempty"`
+	// Reject records that a strict ladder refused the pick. Without it the panel
+	// would render a rejection as an empty step, which reads the same as "the
+	// plugin had nothing to say" -- the opposite of what happened.
+	Reject       bool   `json:"reject,omitempty"`
+	RejectReason string `json:"reject_reason,omitempty"`
 }
 
 // probe replays a rule against a candidate set on a throwaway instance, so the
@@ -783,6 +841,8 @@ func (p *schedulerPlugin) probe(
 			Handled:         response.Handled,
 			AuthID:          response.AuthID,
 			DelegateBuiltin: response.DelegateBuiltin,
+			Reject:          response.Reject,
+			RejectReason:    response.RejectReason,
 		})
 	}
 	return steps

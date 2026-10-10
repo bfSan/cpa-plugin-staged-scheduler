@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginabi"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
 // Plugin identity. The name is what the CPA plugin list shows; the repository
@@ -14,7 +14,7 @@ import (
 // install themselves.
 const (
 	pluginMetadataName = "Staged Account Scheduler"
-	pluginVersion      = "0.1.0"
+	pluginVersion      = "0.2.0"
 	pluginAuthor       = "bfSan"
 	pluginRepoURL      = "https://github.com/bfSan/cpa-plugin-staged-scheduler"
 )

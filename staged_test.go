@@ -1,9 +1,10 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
 // The staged strategy exists to express one thing: burn account A, then B, then
@@ -91,7 +92,11 @@ rules:
 
 // Once the whole ladder is exhausted the plugin must hand the request back rather
 // than invent a selection.
-func TestStagedHandsBackWhenNothingInTheLadderIsAvailable(t *testing.T) {
+// A strict ladder is a whitelist: when no account it names is available, the pick
+// is refused rather than handed back. Handing back was the hole this closes --
+// the built-in selector would then pick a credential the operator never listed,
+// so the ladder was a preference and not a boundary.
+func TestStagedStrictRejectsWhenNothingInTheLadderIsAvailable(t *testing.T) {
 	plugin := newSchedulerPlugin()
 	if err := plugin.Reconfigure([]byte(`
 rules:
@@ -109,8 +114,67 @@ rules:
 		Model:      "gpt-6.1-sol",
 		Candidates: []pluginapi.SchedulerAuthCandidate{codexCandidate("Z")},
 	})
-	if got.Handled || got.AuthID != "" {
-		t.Fatalf("pick = %+v, want unhandled when no listed account is available", got)
+	if !got.Handled || !got.Reject {
+		t.Fatalf("pick = %+v, want a rejection when strict and no listed account is available", got)
+	}
+	if got.AuthID != "" {
+		t.Errorf("AuthID = %q, want empty: a rejection selects nothing", got.AuthID)
+	}
+	if got.RejectCode != "auth_unavailable" {
+		t.Errorf("RejectCode = %q, want auth_unavailable", got.RejectCode)
+	}
+	if !strings.Contains(got.RejectReason, "gpt-6.1-sol") {
+		t.Errorf("RejectReason = %q, want it to name the model", got.RejectReason)
+	}
+}
+
+// The same ladder under exclude keeps the old escape hatch, so an operator who
+// wants a fallback can still have one. Only the default changed.
+func TestStagedExcludeHandsBackWhenNothingInTheLadderIsAvailable(t *testing.T) {
+	plugin := newSchedulerPlugin()
+	if err := plugin.Reconfigure([]byte(`
+rules:
+  gpt-6.1-sol:
+    strategy: staged
+    unlisted: exclude
+    stages:
+      - name: primary
+        mode: first
+        accounts: [A]
+`)); err != nil {
+		t.Fatalf("Reconfigure() error = %v", err)
+	}
+
+	got := plugin.Pick(pluginapi.SchedulerPickRequest{
+		Model:      "gpt-6.1-sol",
+		Candidates: []pluginapi.SchedulerAuthCandidate{codexCandidate("Z")},
+	})
+	if got.Handled || got.Reject {
+		t.Fatalf("pick = %+v, want a hand-back when exclude and no listed account is available", got)
+	}
+}
+
+// An empty candidate set is the same decision point as a spent ladder: none of
+// the named accounts can serve the model. A strict ladder must refuse here too,
+// otherwise the host could bypass the whitelist simply by offering fewer
+// candidates.
+func TestStagedStrictRejectsOnEmptyCandidates(t *testing.T) {
+	plugin := newSchedulerPlugin()
+	if err := plugin.Reconfigure([]byte(`
+rules:
+  gpt-6.1-sol:
+    strategy: staged
+    stages:
+      - name: primary
+        mode: first
+        accounts: [A]
+`)); err != nil {
+		t.Fatalf("Reconfigure() error = %v", err)
+	}
+
+	got := plugin.Pick(pluginapi.SchedulerPickRequest{Model: "gpt-6.1-sol"})
+	if !got.Handled || !got.Reject {
+		t.Fatalf("pick = %+v, want a rejection on an empty candidate set", got)
 	}
 }
 
@@ -144,9 +208,12 @@ rules:
 	}
 }
 
-// Exclude is the default: naming accounts is a statement about the whole pool, so
-// an unmentioned credential must not silently receive traffic.
-func TestStagedExcludesUnlistedAccountsByDefault(t *testing.T) {
+// Strict is the default: naming accounts is a statement about the whole pool, so
+// an unmentioned credential must not receive traffic -- and when the ladder has
+// nothing left, that has to be refused rather than handed back, because a
+// hand-back lets the built-in selector pick exactly the credential that was
+// never named.
+func TestStagedStrictIsTheDefaultAndRefusesUnlisted(t *testing.T) {
 	plugin := newSchedulerPlugin()
 	if err := plugin.Reconfigure([]byte(`
 rules:
@@ -160,12 +227,47 @@ rules:
 		t.Fatalf("Reconfigure() error = %v", err)
 	}
 
+	// A healthy ladder is unaffected: it never looks at the unlisted credential.
 	got := plugin.Pick(pluginapi.SchedulerPickRequest{
+		Model:      "gpt-6.1-sol",
+		Candidates: []pluginapi.SchedulerAuthCandidate{codexCandidate("A"), codexCandidate("C")},
+	})
+	if !got.Handled || got.AuthID != "A" {
+		t.Fatalf("pick = %+v, want A while the ladder has an account", got)
+	}
+
+	// Once only the unlisted credential remains, strict refuses instead of
+	// letting C through.
+	got = plugin.Pick(pluginapi.SchedulerPickRequest{
 		Model:      "gpt-6.1-sol",
 		Candidates: []pluginapi.SchedulerAuthCandidate{codexCandidate("C")},
 	})
-	if got.Handled {
-		t.Fatalf("pick = %+v, want unlisted credential to be ignored", got)
+	if !got.Reject {
+		t.Fatalf("pick = %+v, want a rejection so the unlisted credential is never used", got)
+	}
+}
+
+// The default has to be visible in the snapshot, because the panel shows it and
+// the config may have been written before the mode existed.
+func TestStagedEmptyUnlistedNormalisesToStrict(t *testing.T) {
+	plugin := newSchedulerPlugin()
+	if err := plugin.Reconfigure([]byte(`
+rules:
+  gpt-6.1-sol:
+    strategy: staged
+    stages:
+      - name: primary
+        mode: first
+        accounts: [A]
+`)); err != nil {
+		t.Fatalf("Reconfigure() error = %v", err)
+	}
+	snaps := plugin.snapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("snapshots() = %d rows, want 1", len(snaps))
+	}
+	if snaps[0].Unlisted != unlistedStrict {
+		t.Errorf("Unlisted = %q, want %q", snaps[0].Unlisted, unlistedStrict)
 	}
 }
 
@@ -448,5 +550,41 @@ rules:
 	}
 	if stages[1].Weights["C"] != 2 {
 		t.Fatalf("pool weights = %+v, want C:2", stages[1].Weights)
+	}
+}
+
+// 复现：对「还没有保存规则」的模型做试算时，probe 会合成一条零值规则，
+// 其 Unlisted 是 ""，而 "" 不等于 "strict"。于是试算显示「交回 CPA」，
+// 但真存下来之后（normalize 补成 strict）实际是「拒绝」—— 界面在保存前
+// 给出与实际相反的行为说明。
+func TestProbeOnUnconfiguredModelMatchesSavedBehaviour(t *testing.T) {
+	plugin := newSchedulerPlugin()
+	if err := plugin.Reconfigure([]byte(`rules: {}`)); err != nil {
+		t.Fatal(err)
+	}
+	// 模型没有规则；面板选择 staged 策略后试算，候选里没有阶梯账号。
+	steps := plugin.probe("brand-new-model", "staged", []pluginapi.SchedulerAuthCandidate{codexCandidate("Z")}, 1)
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+	t.Logf("未配置模型 + staged 试算 → handled=%v reject=%v", steps[0].Handled, steps[0].Reject)
+
+	// 保存同样的规则后再试算，两者必须一致。
+	if err := plugin.Reconfigure([]byte(`
+rules:
+  brand-new-model:
+    strategy: staged
+    stages:
+      - name: s1
+        mode: first
+        accounts: [A]
+`)); err != nil {
+		t.Fatal(err)
+	}
+	saved := plugin.probe("brand-new-model", "staged", []pluginapi.SchedulerAuthCandidate{codexCandidate("Z")}, 1)
+	t.Logf("已保存规则   + staged 试算 → handled=%v reject=%v", saved[0].Handled, saved[0].Reject)
+
+	if steps[0].Reject != saved[0].Reject {
+		t.Errorf("试算与保存后行为不一致：未保存 reject=%v，已保存 reject=%v", steps[0].Reject, saved[0].Reject)
 	}
 }

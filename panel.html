@@ -297,8 +297,15 @@ pre.dump{background:var(--code-bg);color:var(--code-fg);border-radius:8px;paddin
         <button class="mini" id="btnAutoLadder" title="按该模型可用账号自动生成一条阶梯">自动编排</button>
       </div>
       <div class="bar" id="unlistedBar" style="display:none">
-        <label class="chk"><input type="checkbox" id="editUnlisted">最后的阶段也吸收未列出的账号(兜底池)</label>
+        <label class="chk" style="gap:6px">没列进阶梯的账号
+          <select id="editUnlisted" style="min-width:280px">
+            <option value="strict">完全不使用；阶梯全不可用时直接报错（默认）</option>
+            <option value="exclude">完全不使用；但阶梯全不可用时交回 CPA 兜底</option>
+            <option value="include">当作兜底池，追加到最后一个阶段轮转</option>
+          </select>
+        </label>
       </div>
+      <div class="note" id="unlistedNote" style="display:none;padding:2px 14px 8px"></div>
       <div class="body tall" id="editorBody">
         <div class="empty">先选一条规则,或新建一条。</div>
       </div>
@@ -441,6 +448,14 @@ const STRATEGY_LABEL = {
 const MODE_LABEL = {
   "first": "first（固定当前账号，烧干才换）",
   "weighted-round-robin": "weighted-round-robin（组内按权重轮转）"
+};
+// 这三种模式的差别只在「阶梯里没有一个账号可用」时才体现。交回 CPA 和直接报错的
+// 区别很隐蔽：交回之后 CPA 内置调度可能在同一个候选池里挑走一个你没列过的账号，
+// 那样阶梯就只是偏好而不是边界。所以把后果写在界面上。
+const UNLISTED_NOTE = {
+  strict: '<b>只使用上面列出的账号。</b>阶梯里一个都不剩时（都被冷却/额度/禁用，或宿主根本没把它们放进候选），请求会直接失败——不会退回内置调度，因此绝不会用到没列出的账号。',
+  exclude: '只使用上面列出的账号；但阶梯里一个都不剩时，会<b>交回 CPA 内置调度兜底</b>——那时可能用到你没列出的账号。本部署还开着 session-affinity，兜底范围是所有优先级的账号。',
+  include: '<b>未列出的账号会被追加到最后一个阶段</b>一起轮转，等于把阶梯最后一层当作全池兜底。适合「先烧 A，再让所有号分摊」。'
 };
 
 function markDirty(){
@@ -754,7 +769,7 @@ function normalizeRules(list){
         accounts: (s.accounts || []).slice(),
         weights: s.weights || {}
       })),
-      unlisted: r.unlisted || "exclude",
+      unlisted: r.unlisted || "strict",
       sharedWith: (r.shared_with || []).slice()
     };
   });
@@ -850,7 +865,11 @@ function renderEditor(){
     : covered.length === 1 ? (avail.length + " 个账号可服务该模型")
     : (common ? (covered.length + " 个模型共同可用账号 " + common.size + " 个") : (covered.length + " 个模型 (无法判断共同账号)"));
   $("unlistedBar").style.display = rule.strategy === "staged" ? "" : "none";
-  $("editUnlisted").checked = rule.unlisted === "include";
+  if ($("editUnlisted").value !== rule.unlisted) $("editUnlisted").value = rule.unlisted;
+  // 这三种模式的差别只在“阶梯全不可用”时体现，而那时用户多半看不到报错来自插件，
+  // 所以把当前选择的结果写在下面，而不是让他去猜。
+  $("unlistedNote").style.display = rule.strategy === "staged" ? "" : "none";
+  $("unlistedNote").innerHTML = UNLISTED_NOTE[rule.unlisted] || "";
 
   // 共用条：这条规则还覆盖哪些模型。它们共用同一套阶梯，所以这里只改名单，
   // 不复制阶梯内容。
@@ -1137,7 +1156,8 @@ function rulePayload(rule){
       if (s.mode !== "first" && s.weights && Object.keys(s.weights).length) out.weights = s.weights;
       return out;
     });
-    if (rule.unlisted === "include") entry.unlisted = "include";
+    // strict 是默认值，写出来也不会改变语义，所以只在非默认时显式写出。
+    if (rule.unlisted && rule.unlisted !== "strict") entry.unlisted = rule.unlisted;
   } else {
     if (rule.provider_group_by) entry["provider-group-by"] = rule.provider_group_by;
     if (rule.provider_weights && Object.keys(rule.provider_weights).length) {
@@ -1230,6 +1250,9 @@ function renderPreview(data){
     const style = ` style="--i:${i}"`;
     if (s.auth_id) return `<span class="stage-step"${style}>#${s.index + 1} <b>${esc(shortName(s.auth_id))}</b></span>`;
     if (s.delegate_builtin) return `<span class="stage-step"${style}>#${s.index + 1} 委托内置 <b>${esc(s.delegate_builtin)}</b></span>`;
+    // 严格模式拒绝这一发时，说清是「拒绝」而不是「交回」。两者在这个位置长得
+    // 一样（都没有 auth_id），但后果完全相反：拒绝会失败，交回会用别的账号。
+    if (s.reject) return `<span class="stage-step miss"${style} title="${esc(s.reject_reason || "")}">#${s.index + 1} <b style="color:var(--err)">拒绝</b>（阶梯耗尽，不使用未列出的账号）</span>`;
     return `<span class="stage-step miss"${style}>#${s.index + 1} 不接管（交回 CPA）</span>`;
   }).join("") + '<div style="clear:both"></div>';
 
@@ -1372,8 +1395,8 @@ $("btnAddRule").addEventListener("click", () => {
     return;
   }
   rules[model] = ladder
-    ? { strategy: "staged", stages: ladder, unlisted: "exclude", provider_group_by: "", provider_weights: {}, sharedWith: shared }
-    : { strategy: strategies[0] || "fill-first", stages: [], unlisted: "exclude", provider_group_by: "", provider_weights: {}, sharedWith: shared };
+    ? { strategy: "staged", stages: ladder, unlisted: "strict", provider_group_by: "", provider_weights: {}, sharedWith: shared }
+    : { strategy: strategies[0] || "fill-first", stages: [], unlisted: "strict", provider_group_by: "", provider_weights: {}, sharedWith: shared };
   // 新规则的可用账号直接勾进试算池，省掉一次手工勾选。
   availableFor(model).filter(usable).forEach(a => picked.add(a.name));
   selectedModels = [];
@@ -1413,7 +1436,8 @@ $("btnAutoLadder").addEventListener("click", () => {
 });
 $("editUnlisted").addEventListener("change", () => {
   if (!editing || !rules[editing]) return;
-  rules[editing].unlisted = $("editUnlisted").checked ? "include" : "exclude";
+  rules[editing].unlisted = $("editUnlisted").value || "strict";
+  $("unlistedNote").innerHTML = UNLISTED_NOTE[rules[editing].unlisted] || "";
   markDirty();
 });
 $("btnSaveRules").addEventListener("click", () => busy($("btnSaveRules"), () =>

@@ -55,6 +55,54 @@ Provider IDs and their weight keys are trimmed and normalized to lowercase. Base
 
 Rule matching is exact after trimming surrounding whitespace. Add another model by adding another entry under `rules`; no plugin rebuild is required.
 
+### What a ladder does with accounts it does not name
+
+`unlisted` is the difference between "a ladder is a preference" and "a ladder is a
+whitelist", so it covers both halves of that question: which candidates the ladder may
+*pick*, and what happens when it can pick none of them.
+
+```yaml
+rules:
+  my-model:
+    strategy: staged
+    unlisted: strict      # default
+    stages:
+      - name: primary
+        mode: first
+        accounts: [A]
+      - name: pool
+        mode: weighted-round-robin
+        accounts: [C, D, E]
+```
+
+| `unlisted` | Which accounts are picked | When the ladder can pick none |
+| --- | --- | --- |
+| `strict` (default) | only those a stage names | refuse the pick |
+| `exclude` | only those a stage names | hand back to the host's built-in selector |
+| `include` | named accounts, then every other candidate appended to the final stage | n/a: the final stage always has the rest |
+
+`strict` exists because `exclude` alone did not hold the line. Handing back is not a
+neutral no-op: the built-in selector then chooses from the same candidate pool, so it may
+pick exactly the credential the operator never named — and with `session-affinity: true`
+in `routing:` it chooses from every priority tier rather than just the top one. A ladder
+written as a list of allowed accounts therefore was not one. `strict` closes that by
+refusing instead.
+
+The refusal is terminal rather than a retry: the rejection carries no HTTP status, so it
+is not in the host's retryable set (`403/408/429/500/502/503/504`) and selection stops
+instead of looping. The caller sees `auth_unavailable`.
+
+`strict` also refuses when the candidate set is empty, which is the same decision point:
+none of the named accounts can serve the model. Treating it as a hand-back instead would
+let the host bypass the whitelist simply by offering fewer candidates.
+
+One consequence is worth planning for. `strict` cannot tell "my accounts are all cooling
+down" apart from "my accounts are mostly disabled, so the host never offered them". Both
+refuse, so a ladder listing credentials that are largely `disabled` will fail requests
+that `exclude` would have served from elsewhere. Check the account statuses in the panel's
+left column before choosing `strict`, and prefer `exclude` where a fallback matters more
+than the boundary.
+
 ## Commands
 
 ```bash

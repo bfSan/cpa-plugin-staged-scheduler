@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
 // A rule's `models` list exists so one ladder can serve an alias and its upstream
