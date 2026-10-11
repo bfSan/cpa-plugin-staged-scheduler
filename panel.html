@@ -310,8 +310,22 @@ pre.dump{background:var(--code-bg);color:var(--code-fg);border-radius:8px;paddin
         <span class="spacer"></span><span class="chip" id="sessionState"></span></h2>
       <div class="bar">
         <label class="chk"><input type="checkbox" id="sessOn"> 启用</label>
-        <label class="chk">有效期 <input type="text" id="sessTTL" placeholder="1h" style="width:90px"></label>
-        <label class="chk">只对这些阶段生效 <input type="text" id="sessStages" placeholder="留空=全部加权阶段" style="width:220px"></label>
+        <span class="chk">有效期</span>
+        <select id="sessTTL" style="width:130px">
+          <option value="15m">15 分钟</option>
+          <option value="30m">30 分钟</option>
+          <option value="1h">1 小时</option>
+          <option value="2h">2 小时</option>
+          <option value="6h">6 小时</option>
+          <option value="24h">24 小时</option>
+          <option value="custom">自定义…</option>
+        </select>
+        <input type="text" id="sessTTLCustom" placeholder="如 45m / 3h" style="width:110px;display:none">
+      </div>
+      <div class="bar" style="border-top:none;padding-top:0">
+        <span class="chk">生效阶段</span>
+        <span class="chips" id="sessStageChips"></span>
+        <span class="ver" id="sessStageHint"></span>
       </div>
       <div class="note" id="sessNote"></div>
     </section>
@@ -946,13 +960,56 @@ function fillStrategySelects(){
 // 关掉之后并不是"没有粘性"这么简单：宿主自己的会话粘性在插件接管选号后就不再
 // 运行了，所以关掉意味着同一个会话会按阶梯轮转、每轮可能换账号。这句话必须写在
 // 界面上，否则关掉的人会以为回到了"宿主默认"，而实际是"完全没有粘性"。
+// TTL_PRESETS 是下拉里给出的常见档位。留出"自定义"是因为运行时长的差别很大
+// （短会话几分钟、长任务几小时），任何固定档位都会有人不够用。
+const TTL_PRESETS = ["15m", "30m", "1h", "2h", "6h", "24h"];
+
+// normalizeTTL 把 Go 的 Duration.String() 归一成习惯写法。
+//
+// 后端返回的是 1h0m0s / 30m0s 这种形式，而预设写的是 1h / 30m。不归一的话每个
+// 值都匹配不上预设，下拉会永远停在"自定义"，看起来像没保存成功。
+function normalizeTTL(raw){
+  const t = String(raw || "").trim();
+  if (!t) return "1h";
+  // 整点小时：1h0m0s → 1h；整分钟：30m0s → 30m。
+  const h = t.match(/^(\d+)h0m0s$/); if (h) return h[1] + "h";
+  const m = t.match(/^(\d+)m0s$/);   if (m) return m[1] + "m";
+  const s = t.match(/^(\d+)s$/);     if (s) return s[1] + "s";
+  return t;
+}
+
+// allStageNames 收集当前所有规则里出现过的阶段名，用来生成"生效阶段"的可点选项。
+// 阶段名是每条规则自己起的，所以只能从现有规则里推，不能写死。
+function allStageNames(){
+  const names = new Set();
+  Object.keys(rules).forEach(m => {
+    const r = rules[m];
+    if (r && r.stages) r.stages.forEach(st => { if (st && st.name) names.add(st.name); });
+  });
+  return Array.from(names).sort();
+}
+
+// renderSession 把开关状态写回控件，并说清"关掉会怎样"。
+//
+// 关掉之后并不是"没有粘性"这么简单：宿主自己的会话粘性在插件接管选号后就不再
+// 运行了，所以关掉意味着同一个会话会按阶梯轮转、每轮可能换账号。这句话必须写在
+// 界面上，否则关掉的人会以为回到了"宿主默认"，而实际是"完全没有粘性"。
 function renderSession(){
   const on = $("sessOn");
   if (on) on.checked = !!sessionCfg.affinity;
-  const ttl = $("sessTTL");
-  if (ttl && document.activeElement !== ttl) ttl.value = sessionCfg.ttl || "";
-  const st = $("sessStages");
-  if (st && document.activeElement !== st) st.value = (sessionCfg.stages || []).join(", ");
+
+  // 有效期：预设命中就选预设，否则落到"自定义"并把输入框露出来。
+  const sel = $("sessTTL");
+  const custom = $("sessTTLCustom");
+  const ttl = normalizeTTL(sessionCfg.ttl);
+  if (sel) sel.value = TTL_PRESETS.indexOf(ttl) >= 0 ? ttl : "custom";
+  if (custom) {
+    custom.style.display = (sel && sel.value === "custom") ? "" : "none";
+    if (document.activeElement !== custom) custom.value = TTL_PRESETS.indexOf(ttl) >= 0 ? "" : ttl;
+  }
+
+  renderStageChips();
+
   const chip = $("sessionState");
   if (chip) {
     chip.textContent = sessionCfg.affinity ? "已启用" : "未启用";
@@ -961,18 +1018,54 @@ function renderSession(){
   const note = $("sessNote");
   if (note) {
     note.innerHTML = sessionCfg.affinity
-      ? '同一会话在<b>加权轮转</b>阶段内固定用同一个账号；该账号不可用（冷却/额度/被移出候选）时自动换绑。'
-        + '<code>first</code> 阶段本来就会一直用同一个号，不受这里影响。'
-        + '没带会话标识的请求（如没有 <code>X-Session-Id</code>）仍按阶梯轮转。'
+      ? '同一会话固定用阶梯给出的那个账号，<b>跨整个阶梯</b>生效；该账号不可用'
+        + '（冷却/额度/被移出候选/不在阶梯里）时自动换绑到阶梯的下一个。'
+        + '没带会话标识的请求（如没有 <code>Session-Id</code>）仍按阶梯轮转。'
       : '<b>未启用</b>时：插件接管选号后，宿主自带的会话粘性不再生效，'
         + '同一个会话会按阶梯轮转、每次可能换账号。想让会话固定用同一个号，就打开上面的开关。';
   }
 }
 
+// renderStageChips 画出"生效阶段"的可点选项。一个都不选 = 全部阶段生效，这也是
+// 默认值，所以未选状态必须读起来是"全部"而不是"没有"。
+function renderStageChips(){
+  const box = $("sessStageChips");
+  const hint = $("sessStageHint");
+  if (!box) return;
+  const names = allStageNames();
+  const picked = sessionCfg.stages || [];
+
+  if (!names.length) {
+    box.innerHTML = '<span class="ver">（还没有规则，先建规则再设阶段）</span>';
+    if (hint) hint.textContent = "";
+    return;
+  }
+
+  // 只在阶段名集合变化时重建 DOM。每次点击都重建会让"再点一下取消"失效：
+  // 事件委托挂在容器上，而重建丢掉的旧节点已脱离文档，点击不再冒泡到容器。
+  // 集合没变时只更新选中态，节点保持稳定。
+  const sameSet = box.dataset.names === names.join("\u0000");
+  if (!sameSet) {
+    box.dataset.names = names.join("\u0000");
+    box.innerHTML = names.map(n =>
+      `<span class="mchip" data-stage="${esc(n)}">${esc(n)}</span>`
+    ).join("");
+  }
+  Array.from(box.querySelectorAll(".mchip")).forEach(el => {
+    el.classList.toggle("on", picked.indexOf(el.dataset.stage) >= 0);
+  });
+  if (hint) hint.textContent = picked.length ? "只在这几个阶段粘" : "不选 = 全部阶段都粘";
+}
+
 function readSessionFromUI(){
   sessionCfg.affinity = !!$("sessOn").checked;
-  sessionCfg.ttl = ($("sessTTL").value || "1h").trim();
-  sessionCfg.stages = ($("sessStages").value || "").split(",").map(x => x.trim()).filter(Boolean);
+  const sel = $("sessTTL");
+  const custom = $("sessTTLCustom");
+  sessionCfg.ttl = (sel && sel.value === "custom")
+    ? (custom.value || "1h").trim()
+    : (sel ? sel.value : "1h");
+  sessionCfg.stages = Array.from(document.querySelectorAll("#sessStageChips .mchip.on"))
+    .map(el => el.dataset.stage);
 }
 
 function renderRuleList(){
@@ -1703,7 +1796,7 @@ $("editUnlisted").addEventListener("change", () => {
   $("unlistedNote").innerHTML = UNLISTED_NOTE[rules[editing].unlisted] || "";
   markDirty();
 });
-["sessOn", "sessTTL", "sessStages"].forEach(id => {
+["sessOn", "sessTTL", "sessTTLCustom"].forEach(id => {
   const el = $(id);
   if (!el) return;
   el.addEventListener(el.type === "checkbox" ? "change" : "input", () => {
@@ -1712,6 +1805,19 @@ $("editUnlisted").addEventListener("change", () => {
     markDirty();
   });
 });
+
+// 阶段 chip 是点选切换。切换后立即重画，让选中态和提示文字保持一致。
+const sessStageBox = $("sessStageChips");
+if (sessStageBox) {
+  sessStageBox.addEventListener("click", ev => {
+    const chip = ev.target.closest(".mchip");
+    if (!chip) return;
+    chip.classList.toggle("on");
+    readSessionFromUI();
+    renderSession();
+    markDirty();
+  });
+}
 
 $("btnSaveRules").addEventListener("click", () => busy($("btnSaveRules"), () =>
   saveRules().catch(e => toast("err", e.message))));

@@ -140,10 +140,9 @@ func TestStagedPick_RebindsWhenBoundAccountVanishes(t *testing.T) {
 	}
 }
 
-// A "first" stage must not be pinned by the binding table: its whole purpose is
-// to burn the head of the list until the host stops offering it, so re-selecting
-// an earlier account after the ladder moved on would defeat the rule.
-func TestStagedPick_FirstStageIgnoresSessionBinding(t *testing.T) {
+// A binding must not survive the account leaving the candidate set. The ladder
+// then moves on, and the session follows it.
+func TestStagedPick_RebindsWhenBoundAccountLeavesCandidates(t *testing.T) {
 	plugin := newSchedulerPlugin()
 	if err := plugin.Reconfigure([]byte(`
 rules:
@@ -160,17 +159,91 @@ rules:
 		t.Fatalf("Reconfigure() error = %v", err)
 	}
 
-	// Bind the session while auth-a is available.
 	if got := pickWithSession(t, plugin, "sess-f", stickyCandidates()).AuthID; got != "auth-a" {
 		t.Fatalf("first pick = %q, want auth-a", got)
 	}
-	// auth-a is gone; a "first" stage must move to auth-b even though the
-	// session is bound to auth-a.
+	// auth-a is gone from the candidate set, so the binding cannot be honoured
+	// and the ladder must move to auth-b.
 	got := pickWithSession(t, plugin, "sess-f", []pluginapi.SchedulerAuthCandidate{
 		{ID: "auth-b", Provider: "p", Status: "active"},
 	}).AuthID
 	if got != "auth-b" {
 		t.Fatalf("after auth-a vanished, pick = %q, want auth-b", got)
+	}
+}
+
+// The reason bindings cover the whole ladder: when the first stage's account is
+// flaky, a session that spilled into the next stage must stay there instead of
+// alternating back and forth as the flaky account comes and goes. This is the
+// behaviour that per-stage binding could not provide.
+func TestStagedPick_BindingSpansStages(t *testing.T) {
+	const twoStages = `
+rules:
+  sticky-model:
+    strategy: staged
+    unlisted: strict
+    stages:
+      - name: burn
+        mode: first
+        accounts:
+          - auth-a
+      - name: pool
+        mode: weighted-round-robin
+        accounts:
+          - auth-b
+          - auth-c
+`
+	plugin := newSchedulerPlugin()
+	if err := plugin.Reconfigure([]byte("session_affinity: true\n" + twoStages)); err != nil {
+		t.Fatalf("Reconfigure() error = %v", err)
+	}
+
+	// Start with auth-a present: the first stage takes it.
+	if got := pickWithSession(t, plugin, "sess-span", stickyCandidates()).AuthID; got != "auth-a" {
+		t.Fatalf("first pick = %q, want auth-a", got)
+	}
+
+	// auth-a drops out. The session must move into the pool and bind there.
+	spilled := pickWithSession(t, plugin, "sess-span", []pluginapi.SchedulerAuthCandidate{
+		{ID: "auth-b", Provider: "p", Status: "active"},
+		{ID: "auth-c", Provider: "p", Status: "active"},
+	}).AuthID
+	if spilled != "auth-b" && spilled != "auth-c" {
+		t.Fatalf("after spill, pick = %q, want an account from the pool", spilled)
+	}
+
+	// auth-a is back. A per-stage binding would have returned to it; the session
+	// must instead stay on the account it spilled to.
+	for i := 0; i < 3; i++ {
+		got := pickWithSession(t, plugin, "sess-span", stickyCandidates()).AuthID
+		if got != spilled {
+			t.Fatalf("after auth-a returned, pick = %q, want the spilled account %q", got, spilled)
+		}
+	}
+}
+
+// A binding must never widen a strict ladder: candidates can contain accounts the
+// rule never lists, and honouring a binding to one of those would silently use an
+// account the operator excluded.
+func TestStagedPick_BindingNeverWidensStrictLadder(t *testing.T) {
+	plugin := newSchedulerPlugin()
+	if err := plugin.Reconfigure([]byte("session_affinity: true\n" + stagedWeightedRule)); err != nil {
+		t.Fatalf("Reconfigure() error = %v", err)
+	}
+	// Bind the session to auth-a.
+	if got := pickWithSession(t, plugin, "sess-strict", stickyCandidates()).AuthID; got != "auth-a" {
+		t.Fatalf("first pick = %q, want auth-a", got)
+	}
+	// auth-a is listed but gone; auth-z is offered but not listed. The pick must
+	// come from the ladder, never from the unlisted candidate.
+	for i := 0; i < 3; i++ {
+		got := pickWithSession(t, plugin, "sess-strict", []pluginapi.SchedulerAuthCandidate{
+			{ID: "auth-z", Provider: "p", Status: "active"},
+			{ID: "auth-b", Provider: "p", Status: "active"},
+		}).AuthID
+		if got != "auth-b" {
+			t.Fatalf("pick = %q, want the listed auth-b", got)
+		}
 	}
 }
 
@@ -249,10 +322,9 @@ session_affinity: true
 	}
 }
 
-// A stage allow-list restricts stickiness to the named stages. Here the only
-// weighted stage is named "pool", so listing it must pin; listing a different
-// name must not.
-func TestStagedPick_StageAllowList(t *testing.T) {
+// The stage list gates which stages may CREATE a binding. A stage outside the
+// list keeps rotating, so picks from it never pin.
+func TestStagedPick_StageListGatesCreation(t *testing.T) {
 	withList := func(stages string) *schedulerPlugin {
 		plugin := newSchedulerPlugin()
 		if err := plugin.Reconfigure([]byte(
@@ -262,21 +334,64 @@ func TestStagedPick_StageAllowList(t *testing.T) {
 		return plugin
 	}
 
-	// "pool" is the weighted stage, so listing it keeps stickiness on.
+	// "pool" is the weighted stage, so listing it lets it pin.
 	included := withList("  - pool\n")
 	first := pickWithSession(t, included, "sess-in", stickyCandidates()).AuthID
 	if next := pickWithSession(t, included, "sess-in", stickyCandidates()).AuthID; next != first {
-		t.Fatalf("allow-listed stage did not pin: %q then %q", first, next)
+		t.Fatalf("listed stage did not pin: %q then %q", first, next)
 	}
 
-	// A name that matches no stage turns stickiness off for every stage.
+	// A name that matches no stage means nothing may create a binding.
 	excluded := withList("  - some-other-stage\n")
 	seen := map[string]bool{}
 	for i := 0; i < 3; i++ {
 		seen[pickWithSession(t, excluded, "sess-out", stickyCandidates()).AuthID] = true
 	}
 	if len(seen) < 2 {
-		t.Fatalf("non-matching allow-list still pinned: %v", seen)
+		t.Fatalf("unlisted stage still pinned: %v", seen)
+	}
+}
+
+// The stage list must not break an existing binding: a session already pinned
+// keeps its account even when a pick would come from a stage that may not create
+// bindings. Gating creation must never gate lookup, or the session would flip
+// back to rotating as soon as the ladder moved.
+func TestStagedPick_StageListDoesNotBreakExistingBinding(t *testing.T) {
+	const twoStages = `
+rules:
+  sticky-model:
+    strategy: staged
+    unlisted: strict
+    stages:
+      - name: pool
+        mode: weighted-round-robin
+        accounts:
+          - auth-a
+          - auth-b
+          - auth-c
+      - name: tail
+        mode: weighted-round-robin
+        accounts:
+          - auth-d
+`
+	plugin := newSchedulerPlugin()
+	if err := plugin.Reconfigure([]byte("session_affinity: true\nsession_affinity_stages:\n  - pool\n" + twoStages)); err != nil {
+		t.Fatalf("Reconfigure() error = %v", err)
+	}
+
+	// Bind from the allowed stage.
+	bound := pickWithSession(t, plugin, "sess-gate", stickyCandidates()).AuthID
+	if bound == "" {
+		t.Fatalf("first pick returned no auth id")
+	}
+	// The allowed accounts are gone, so the ladder reaches "tail". The binding
+	// cannot be honoured (account gone), and "tail" may not create a new one --
+	// but the session must still get served.
+	got := pickWithSession(t, plugin, "sess-gate", []pluginapi.SchedulerAuthCandidate{
+		{ID: "auth-d", Provider: "p", Status: "active"},
+	}).AuthID
+	if got != "auth-d" {
+		t.Fatalf("pick = %q, want auth-d from the tail stage", got)
 	}
 }
 

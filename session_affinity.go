@@ -8,7 +8,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
-// Session affinity inside a weighted stage.
+// Session affinity for staged rules.
 //
 // Why this exists: when a scheduler plugin returns an AuthID, the host adopts it
 // verbatim and never runs its own SessionAffinitySelector. That is deliberate --
@@ -18,16 +18,19 @@ import (
 // account on every turn, which is exactly what stickiness is supposed to prevent
 // (prompt cache hits, and not re-uploading the same context to a new upstream).
 //
-// Scope: only weighted-round-robin stages bind. A "first" stage already pins the
-// head of its list until the host stops offering it, so a binding would add
-// nothing there -- and worse, it would fight the stage's whole purpose ("burn A,
-// then B") by re-selecting an earlier account after the ladder had moved on.
+// Scope: the binding covers the whole ladder, not one stage. An earlier version
+// bound only inside weighted stages, on the theory that a "first" stage already
+// pins the head of its list. That theory fails as soon as the head account is
+// flaky: the stage keeps dropping it from the candidate set, so traffic spills
+// into the next stage, and the session ends up alternating between the two --
+// the exact instability stickiness is meant to remove. A session is now pinned
+// to whichever account the ladder gave it, wherever in the ladder that was.
 //
 // Invalidation is the part that has to be right. A binding is a hint, not a
-// promise: if the bound account is no longer in the candidate set (cooled down,
-// disabled, quota exhausted, or no longer listed in the stage) the session is
-// simply re-bound to whatever the rotation picks next. Without that, a session
-// whose account went away would be stuck forever.
+// promise: if the bound account is no longer usable -- cooled down, disabled,
+// quota exhausted, or no longer one of the accounts this rule may use -- the
+// session is simply re-bound to whatever the ladder picks next. Without that, a
+// session whose account went away would be stuck forever.
 
 // maxSessionBindings caps the table so a long-lived process cannot grow it
 // without bound. When full, the oldest entries are dropped: a session that has
@@ -38,8 +41,12 @@ const maxSessionBindings = 4096
 
 // sessionBinding records which account a session is currently using.
 type sessionBinding struct {
-	authID  string
-	model   string
+	authID string
+	model  string
+	// stage is where the account came from, kept for the diagnostic view only.
+	// It is deliberately not part of the lookup: a binding stays valid as long
+	// as the account is usable, even if the ladder would now reach it by a
+	// different stage.
 	stage   string
 	touched time.Time
 }
@@ -50,7 +57,7 @@ type sessionBinding struct {
 // The host derives its own session id from the request body (message hashes) as
 // well, but a scheduler never receives the body, so only explicit headers are
 // available here. That is a real limit, not an oversight: a client that sends no
-// session header cannot be pinned, and for those requests the stage keeps
+// session header cannot be pinned, and for those requests the ladder keeps
 // rotating exactly as before. The names below mirror the ones the host itself
 // recognises, so a client that is sticky for other models is sticky here too.
 func sessionKey(headers http.Header) string {
@@ -64,8 +71,10 @@ func sessionKey(headers http.Header) string {
 		"X-Session-Id",
 		"X-Session-ID",
 		"Session-Id",
+		"Session_id",
 		"X-Conversation-Id",
 		"X-Thread-Id",
+		"Thread-Id",
 		"X-Http-Session-Id",
 		"X-Session-Affinity",
 		"X-Client-Request-Id",
@@ -97,15 +106,22 @@ func headerValue(headers http.Header, name string) string {
 	return ""
 }
 
-// boundAuth returns the account this session is already using for this model and
-// stage, if it is still one of the candidates.
+// boundAuth returns the account this session is already using for this model, if
+// it is still usable.
 //
-// Returning "" means "no usable binding", and the caller must fall through to the
-// normal rotation. That happens on a first request, after the TTL, when the rule
-// or stage changed, and -- the important case -- when the bound account has left
-// the candidate set. The binding is not deleted here; a later request may find the
-// account back in the pool, and in the meantime the caller overwrites it.
-func (p *schedulerPlugin) boundAuth(key, model, stage string, pool []pluginapi.SchedulerAuthCandidate, ttl time.Duration) string {
+// "Usable" means two things, and both matter:
+//
+//   - the host is still offering it (present in candidates), so a cooled-down or
+//     disabled account does not keep receiving traffic;
+//   - the rule still lists it in one of its stages. Candidates come from the host
+//     and may contain accounts the ladder never names; honouring a binding to one
+//     of those would quietly break strict mode, which promises that only the
+//     listed accounts are ever used.
+//
+// Returning "" means "no usable binding", and the caller walks the ladder as
+// usual. The binding is not deleted here: a later request may find the account
+// usable again, and in the meantime the caller overwrites it.
+func (p *schedulerPlugin) boundAuth(key, model string, candidates []pluginapi.SchedulerAuthCandidate, ladderAccounts map[string]bool, ttl time.Duration) string {
 	if key == "" {
 		return ""
 	}
@@ -113,14 +129,17 @@ func (p *schedulerPlugin) boundAuth(key, model, stage string, pool []pluginapi.S
 	if !ok {
 		return ""
 	}
-	if binding.model != model || binding.stage != stage {
+	if binding.model != model {
 		return ""
 	}
 	if time.Since(binding.touched) > ttl {
 		delete(p.sessionBindings, key)
 		return ""
 	}
-	for _, candidate := range pool {
+	if !ladderAccounts[binding.authID] {
+		return ""
+	}
+	for _, candidate := range candidates {
 		if candidate.ID == binding.authID {
 			binding.touched = time.Now()
 			p.sessionBindings[key] = binding

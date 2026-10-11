@@ -14,7 +14,7 @@ import (
 // install themselves.
 const (
 	pluginMetadataName = "Staged Account Scheduler"
-	pluginVersion      = "0.5.0"
+	pluginVersion      = "0.6.0"
 	pluginAuthor       = "bfSan"
 	pluginRepoURL      = "https://github.com/bfSan/cpa-plugin-staged-scheduler"
 )

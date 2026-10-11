@@ -88,7 +88,7 @@ type ruleConfig struct {
 type pluginConfig struct {
 	Rules map[string]ruleConfig `yaml:"rules"`
 
-	// SessionAffinity pins a session to one account inside a weighted stage.
+	// SessionAffinity pins a session to one account across the whole ladder.
 	// Off by default: the host's own session-affinity does not run once this
 	// plugin answers, so before this existed a staged rule rotated every turn.
 	// Turning it on restores stickiness for the models this plugin handles.
@@ -99,10 +99,10 @@ type pluginConfig struct {
 	// such as "30m" or "2h30m".
 	SessionAffinityTTL string `yaml:"session_affinity_ttl"`
 
-	// SessionAffinityStages limits stickiness to the listed stage names. Empty
-	// means every weighted stage. "first" stages are never pinned regardless,
-	// because their contract is to burn the head of the list until the host
-	// stops offering it.
+	// SessionAffinityStages limits which stages may create a binding. Empty
+	// means every stage. This gates creation only: a binding already held for a
+	// model is honoured no matter which stage it came from, because the whole
+	// point is that a session keeps its account as the ladder moves.
 	SessionAffinityStages []string `yaml:"session_affinity_stages"`
 }
 
@@ -151,9 +151,14 @@ func normalizeSessionPolicy(cfg pluginConfig) (sessionPolicy, error) {
 	return policy, nil
 }
 
-// pinsStage reports whether this stage may hold a session binding.
-func (s sessionPolicy) pinsStage(stage stageConfig) bool {
-	if !s.enabled || stage.Mode != stageModeWeightedRoundRobin {
+// appliesTo reports whether a pick from this stage may create a session binding.
+//
+// The switch is per stage rather than per ladder because a ladder can mix a pool
+// the operator wants sticky with one they want to keep rotating. A binding
+// already held for the model is honoured regardless of which stage it came from,
+// so this only gates creation, never lookup.
+func (s sessionPolicy) appliesTo(stage stageConfig) bool {
+	if !s.enabled {
 		return false
 	}
 	if s.stages == nil {
@@ -545,20 +550,49 @@ func (p *schedulerPlugin) pickStagedLocked(
 		return stagedExhausted(model, rule)
 	}
 
+	// Session stickiness is checked before the ladder is walked, and covers the
+	// whole ladder rather than one stage: a session pinned to an account the host
+	// is still offering keeps using it, even when the ladder would now reach that
+	// account by a different stage. See session_affinity.go for why per-stage
+	// binding was not enough.
+	if p.session.enabled {
+		if bound := p.boundAuth(session, model, candidates, ladderAccounts(rule), p.session.ttl); bound != "" {
+			return pluginapi.SchedulerPickResponse{AuthID: bound, Handled: true}
+		}
+	}
+
 	stages := rule.Stages
 	for _, stage := range stages {
 		pool := stagePool(stage, available)
 		if len(pool) == 0 {
 			continue
 		}
-		selected := p.selectFromStage(model, stage, pool, session)
+		selected := p.selectFromStage(model, stage, pool)
 		if selected == "" {
 			continue
+		}
+		if p.session.appliesTo(stage) {
+			p.bindSession(session, model, stage.Name, selected, p.session.ttl)
 		}
 		return pluginapi.SchedulerPickResponse{AuthID: selected, Handled: true}
 	}
 
 	return stagedExhausted(model, rule)
+}
+
+// ladderAccounts is the set of accounts this rule may use, across every stage.
+// A session binding is only honoured for an account in this set, so stickiness
+// can never widen a strict ladder beyond what the operator listed.
+func ladderAccounts(rule ruleConfig) map[string]bool {
+	out := make(map[string]bool)
+	for _, stage := range rule.Stages {
+		for _, account := range stage.Accounts {
+			if id := strings.TrimSpace(account); id != "" {
+				out[id] = true
+			}
+		}
+	}
+	return out
 }
 
 // stagePool returns the candidates of a stage that are actually available,
@@ -584,21 +618,9 @@ func (p *schedulerPlugin) selectFromStage(
 	model string,
 	stage stageConfig,
 	pool []pluginapi.SchedulerAuthCandidate,
-	session string,
 ) string {
 	if stage.Mode == stageModeFirst {
 		return pool[0].ID
-	}
-
-	// Session stickiness applies only where the operator enabled it, and only to
-	// weighted stages. See session_affinity.go. It is checked before the rotation
-	// advances, so a bound session neither consumes a turn nor moves the cursor
-	// for everyone else.
-	pinned := p.session.pinsStage(stage)
-	if pinned {
-		if bound := p.boundAuth(session, model, stage.Name, pool, p.session.ttl); bound != "" {
-			return bound
-		}
 	}
 
 	// Cursors are keyed per model and stage so two models sharing an account
@@ -612,9 +634,6 @@ func (p *schedulerPlugin) selectFromStage(
 		cursor := cursors[stage.Name]
 		selected := pool[cursor%len(pool)]
 		cursors[stage.Name] = cursor + 1
-		if pinned {
-			p.bindSession(session, model, stage.Name, selected.ID, p.session.ttl)
-		}
 		return selected.ID
 	}
 
@@ -658,9 +677,6 @@ func (p *schedulerPlugin) selectFromStage(
 		return ""
 	}
 	current[weightPrefix+selected] -= totalWeight
-	if pinned {
-		p.bindSession(session, model, stage.Name, selected, p.session.ttl)
-	}
 	return selected
 }
 
