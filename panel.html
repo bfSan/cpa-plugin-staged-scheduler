@@ -972,6 +972,35 @@ function normalizeTTL(raw){
   return t;
 }
 
+function renderSession(){
+  const on = $("sessOn");
+  if (on) on.checked = !!sessionCfg.affinity;
+
+  const sel = $("sessTTL");
+  const custom = $("sessTTLCustom");
+  const ttl = normalizeTTL(sessionCfg.ttl);
+  if (sel) sel.value = TTL_PRESETS.indexOf(ttl) >= 0 ? ttl : "custom";
+  if (custom) {
+    custom.style.display = (sel && sel.value === "custom") ? "" : "none";
+    if (document.activeElement !== custom) {
+      custom.value = TTL_PRESETS.indexOf(ttl) >= 0 ? "" : ttl;
+    }
+  }
+
+  const state = $("sessionState");
+  if (state) {
+    state.textContent = sessionCfg.affinity ? "已启用" : "未启用";
+    state.className = "chip" + (sessionCfg.affinity ? " hit" : " none");
+  }
+
+  const note = $("sessNote");
+  if (note) {
+    note.innerHTML = sessionCfg.affinity
+      ? '同一会话固定用阶梯给出的那个账号，<b>对所有已配置阶梯的模型生效</b>；该账号不可用（冷却/额度/被移出候选/不在阶梯里）时自动换绑。没带会话标识的请求（如没有 <code>Session-Id</code>）仍按阶梯轮转。'
+      : '<b>未启用</b>时：插件接管选号后，宿主自带的会话粘性不再生效，同一个会话会按阶梯轮转、每次可能换账号。想让会话固定用同一个号，就打开上面的开关。';
+  }
+}
+
 function readSessionFromUI(){
   sessionCfg.affinity = !!$("sessOn").checked;
   const sel = $("sessTTL");
