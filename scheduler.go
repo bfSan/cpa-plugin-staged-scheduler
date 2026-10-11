@@ -98,12 +98,6 @@ type pluginConfig struct {
 	// Defaults to 1h, matching the host's own default. Accepts Go durations
 	// such as "30m" or "2h30m".
 	SessionAffinityTTL string `yaml:"session_affinity_ttl"`
-
-	// SessionAffinityStages limits which stages may create a binding. Empty
-	// means every stage. This gates creation only: a binding already held for a
-	// model is honoured no matter which stage it came from, because the whole
-	// point is that a session keeps its account as the ladder moves.
-	SessionAffinityStages []string `yaml:"session_affinity_stages"`
 }
 
 // sessionPolicy is the normalized, validated form of the session switches. It is
@@ -111,7 +105,6 @@ type pluginConfig struct {
 type sessionPolicy struct {
 	enabled bool
 	ttl     time.Duration
-	stages  map[string]bool // nil means "every weighted stage"
 }
 
 // defaultSessionTTL matches the host's own session-affinity default.
@@ -138,33 +131,7 @@ func normalizeSessionPolicy(cfg pluginConfig) (sessionPolicy, error) {
 		policy.ttl = parsed
 	}
 
-	if len(cfg.SessionAffinityStages) > 0 {
-		policy.stages = make(map[string]bool, len(cfg.SessionAffinityStages))
-		for _, raw := range cfg.SessionAffinityStages {
-			name := strings.TrimSpace(raw)
-			if name == "" {
-				return sessionPolicy{}, fmt.Errorf("session_affinity_stages has an empty entry")
-			}
-			policy.stages[name] = true
-		}
-	}
 	return policy, nil
-}
-
-// appliesTo reports whether a pick from this stage may create a session binding.
-//
-// The switch is per stage rather than per ladder because a ladder can mix a pool
-// the operator wants sticky with one they want to keep rotating. A binding
-// already held for the model is honoured regardless of which stage it came from,
-// so this only gates creation, never lookup.
-func (s sessionPolicy) appliesTo(stage stageConfig) bool {
-	if !s.enabled {
-		return false
-	}
-	if s.stages == nil {
-		return true
-	}
-	return s.stages[stage.Name]
 }
 
 type schedulerPlugin struct {
@@ -571,7 +538,7 @@ func (p *schedulerPlugin) pickStagedLocked(
 		if selected == "" {
 			continue
 		}
-		if p.session.appliesTo(stage) {
+		if p.session.enabled {
 			p.bindSession(session, model, stage.Name, selected, p.session.ttl)
 		}
 		return pluginapi.SchedulerPickResponse{AuthID: selected, Handled: true}
@@ -853,12 +820,10 @@ type ruleSnapshot struct {
 // stable order to render. Aliases expanded from a models list are reported with
 // their owner in SharedWith, which is what lets the panel show one editable row
 // per ladder instead of one row per alias.
-// sessionSnapshot is the read-only view of the session switches that the status
-// route reports. Stages is nil when stickiness applies to every weighted stage.
+// sessionSnapshot is the read-only view of the global session switches.
 type sessionSnapshot struct {
 	Enabled bool
 	TTL     string
-	Stages  []string
 }
 
 // snapshotWithSession returns the rules and the session switches from a single
@@ -869,20 +834,7 @@ func (p *schedulerPlugin) snapshotWithSession() ([]ruleSnapshot, sessionSnapshot
 	return p.snapshotsLocked(), sessionSnapshot{
 		Enabled: p.session.enabled,
 		TTL:     p.session.ttl.String(),
-		Stages:  sortedKeys(p.session.stages),
 	}
-}
-
-func sortedKeys(set map[string]bool) []string {
-	if len(set) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(set))
-	for key := range set {
-		out = append(out, key)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func (p *schedulerPlugin) snapshots() []ruleSnapshot {

@@ -14,7 +14,7 @@ import (
 // install themselves.
 const (
 	pluginMetadataName = "Staged Account Scheduler"
-	pluginVersion      = "0.6.0"
+	pluginVersion      = "0.7.0"
 	pluginAuthor       = "bfSan"
 	pluginRepoURL      = "https://github.com/bfSan/cpa-plugin-staged-scheduler"
 )
@@ -138,11 +138,6 @@ func pluginRegistration() registration {
 					Name:        "session_affinity_ttl",
 					Type:        pluginapi.ConfigFieldTypeString,
 					Description: "How long a session binding survives unused, e.g. 30m or 1h. Defaults to 1h, matching the host.",
-				},
-				{
-					Name:        "session_affinity_stages",
-					Type:        pluginapi.ConfigFieldTypeArray,
-					Description: "Stage names that may hold a session binding. Empty means every weighted stage; first stages are never pinned.",
 				},
 			},
 		},

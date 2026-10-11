@@ -151,9 +151,8 @@ func statusPayload() map[string]any {
 		"configured": len(rules) > 0,
 		// Reported so the panel can show the switch and the operator can tell
 		// whether stickiness is actually on for the models this plugin handles.
-		"session_affinity":        session.Enabled,
-		"session_affinity_ttl":    session.TTL,
-		"session_affinity_stages": session.Stages,
+		"session_affinity":     session.Enabled,
+		"session_affinity_ttl": session.TTL,
 	}
 	return payload
 }
@@ -307,10 +306,9 @@ func sessionsPayload() map[string]any {
 	})
 
 	return map[string]any{
-		"session_affinity":        activeScheduler.session.enabled,
-		"session_affinity_ttl":    ttl.String(),
-		"session_affinity_stages": sortedKeys(activeScheduler.session.stages),
-		"bindings":                len(rows),
-		"sessions":                rows,
+		"session_affinity":     activeScheduler.session.enabled,
+		"session_affinity_ttl": ttl.String(),
+		"bindings":             len(rows),
+		"sessions":             rows,
 	}
 }
